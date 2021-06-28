@@ -201,7 +201,7 @@ class IntelBuffers {
   #endif
 
   inline void thr_pack(const int ifrom, const int ito, const int ago) {
-    if (ago == 0) {
+    if (true) {
       #if defined(LMP_SIMD_COMPILER)
       #pragma vector aligned
       #pragma ivdep

@@ -1,0 +1,37 @@
+# KSpace style pppm/conp/intel requires INTEL to be installed
+set(CONP2_SOURCES_DIR ${LAMMPS_SOURCE_DIR}/USER-CONP2)
+file(GLOB CONP2_HEADERS ${CONP2_SOURCES_DIR}/*.h)
+file(GLOB CONP2_SOURCES ${CONP2_SOURCES_DIR}/*.cpp)
+
+if(NOT PKG_USER-INTEL)
+  file(GLOB CONP2_INTEL_HEADERS ${CONP2_SOURCES_DIR}/*intel*.h)
+  foreach(INTEL_HEADER ${CONP2_INTEL_HEADERS})
+    list(REMOVE_ITEM CONP2_HEADERS ${INTEL_HEADER})
+  endforeach()
+  file(GLOB CONP2_INTEL_SOURCES ${CONP2_SOURCES_DIR}/*intel*.cpp)
+  foreach(INTEL_SOURCE ${CONP2_INTEL_SOURCES})
+    list(REMOVE_ITEM CONP2_SOURCES ${INTEL_SOURCE})
+  endforeach()
+endif()
+
+set_property(GLOBAL PROPERTY "CONP2_SOURCES" "${CONP2_SOURCES}")
+
+file(GLOB CONP2_FIX_HEADERS ${CONP2_SOURCES_DIR}/fix*.h)
+file(GLOB CONP2_KSP_HEADERS ${CONP2_SOURCES_DIR}/pppm*.h)
+file(GLOB CONP2_CMP_HEADERS ${CONP2_SOURCES_DIR}/compute*.h)
+
+foreach(MY_HEADER ${CONP2_FIX_HEADERS})
+  AddStyleHeader(${MY_HEADER} FIX)
+endforeach()
+
+foreach(MY_HEADER ${CONP2_KSP_HEADERS})
+  AddStyleHeader(${MY_HEADER} KSPACE)
+endforeach()
+
+foreach(MY_HEADER ${CONP2_CMP_HEADERS})
+  AddStyleHeader(${MY_HEADER} COMPUTE)
+endforeach()
+
+get_property(CONP2_SOURCES GLOBAL PROPERTY CONP2_SOURCES)
+target_sources(lammps PRIVATE ${CONP2_SOURCES})
+target_include_directories(lammps PRIVATE ${CONP2_SOURCES_DIR})
