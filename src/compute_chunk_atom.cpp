@@ -28,6 +28,7 @@
 #include "math_const.h"
 #include "memory.h"
 #include "modify.h"
+#include "neighbor.h"
 #include "region.h"
 #include "update.h"
 #include "variable.h"
@@ -685,9 +686,10 @@ void ComputeChunkAtom::compute_ichunk()
 {
   int i;
 
-  // skip if already done on this step
+  // skip if already done on this step. 
+  // Rebuild if the neighbour list has been rebuilt this step, since atoms may have moved off this processor
 
-  if (invoked_ichunk == update->ntimestep) return;
+  if (invoked_ichunk == update->ntimestep && neighbor->ago != 0) return;
 
   // if old IDs persist via storage in fixstore, then just retrieve them
   // yes if idsflag = ONCE, and already done once
