@@ -161,8 +161,6 @@ double ComputeTempDeformChunk::compute_scalar()
 {
   int i,index;
 
-  invoked_scalar = update->ntimestep;
-
   // calculate chunk assignments,
   //   since only atoms in chunks contribute to global temperature
   // compute chunk/atom assigns atoms to chunk IDs
@@ -177,14 +175,8 @@ double ComputeTempDeformChunk::compute_scalar()
 
   // calculate COM position for each chunk
   // This will be used to calculate the streaming velocity at the chunk's COM
-  if (comstep != update->ntimestep){
-    vcm_compute();
-    com_compute();
-    // TODO EVK: Currently this breaks if the atoms move between processors during the integration stage
-    // avoid re-computing VCM more than once per step
-    //comstep = update->ntimestep;
-  }
-  //printf("Proc %d at %d: nlocal = %d\n", comm->me, update->ntimestep, atom->nlocal);
+  vcm_compute();
+  com_compute();
  
   // lamda = COM position in triclinic lamda coords
   // vstream = COM streaming velocity = Hrate*lamda + Hratelo. Will be the same for each atom in the chunk
@@ -229,10 +221,6 @@ double ComputeTempDeformChunk::compute_scalar()
         index = ichunk[i]-1;
         if (index < 0) continue;
         // Calculate streaming velocity at the chunk's centre of mass and apply to all atoms in the chunk
-        if(index > nchunk) {
-          printf("Proc %d error at %d: ichunk[%d] = %d > nchunks. nlocal = %d\n", comm->me, update->ntimestep, i, index, atom->nlocal);
-          exit(1);
-        }
         domain->x2lamda(comall[index], lamda);
         vstream[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
         vstream[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
@@ -268,8 +256,6 @@ void ComputeTempDeformChunk::compute_vector()
 {
   int i,index;
 
-  invoked_vector = update->ntimestep;
-
   // calculate chunk assignments,
   //   since only atoms in chunks contribute to global temperature
   // compute chunk/atom assigns atoms to chunk IDs
@@ -284,10 +270,8 @@ void ComputeTempDeformChunk::compute_vector()
 
   // calculate COM position and velocity for each chunk
 
-  if (comstep != update->ntimestep){
-    com_compute();
-    vcm_compute();
-  }
+  com_compute();
+  vcm_compute();
 
   // lamda = COM position in triclinic lamda coords
   // vstream = COM streaming velocity = Hrate*lamda + Hratelo. Will be the same for each atom in the chunk
