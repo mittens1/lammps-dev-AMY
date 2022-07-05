@@ -126,6 +126,9 @@ class FixNH : public Fix {
 
   double fixedpoint[3];    // location of dilation fixed-point
 
+  char* idchunk;
+  char* idvcm;
+
   void couple();
   virtual void remap();
   void nhc_temp_integrate();

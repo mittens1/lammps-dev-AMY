@@ -324,7 +324,7 @@ void ComputeTempDeformChunk::compute_vector()
 }
 
 /* ----------------------------------------------------------------------
-   calculate velocity of COM for each chunk
+   calculate COM for each chunk
 ------------------------------------------------------------------------- */
 
 void ComputeTempDeformChunk::com_compute()
