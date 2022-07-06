@@ -12,6 +12,10 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
+/* ----------------------------------------------------------------------
+   Contributing author: Emily Kahl (Uni of QLD)
+------------------------------------------------------------------------- */
+
 #include "compute_temp_deform_chunk.h"
 
 #include "atom.h"
@@ -212,7 +216,8 @@ double ComputeTempDeformChunk::compute_scalar()
         vthermal[0] = vcmall[index][0] - vstream[0];
         vthermal[1] = vcmall[index][1] - vstream[1];
         vthermal[2] = vcmall[index][2] - vstream[2];
-        t += (vthermal[0]*vthermal[0] + vthermal[1]*vthermal[1] + vthermal[2]*vthermal[2]) * rmass[i];
+        // Use chunk mass when calculating the kinetic energy
+        t += (vthermal[0]*vthermal[0] + vthermal[1]*vthermal[1] + vthermal[2]*vthermal[2]) * masstotal[index];
         mycount++;
       }
   } else {
@@ -229,7 +234,8 @@ double ComputeTempDeformChunk::compute_scalar()
         vthermal[0] = vcmall[index][0] - vstream[0];
         vthermal[1] = vcmall[index][1] - vstream[1];
         vthermal[2] = vcmall[index][2] - vstream[2];
-        t += (vthermal[0]*vthermal[0] + vthermal[1]*vthermal[1] + vthermal[2]*vthermal[2]) * mass[type[i]] ;
+        // Use chunk mass when calculating the kinetic energy
+        t += (vthermal[0]*vthermal[0] + vthermal[1]*vthermal[1] + vthermal[2]*vthermal[2]) * masstotal[index] ;
         mycount++;
     }
   }
@@ -297,9 +303,6 @@ void ComputeTempDeformChunk::compute_vector()
     if (mask[i] & groupbit) {
       index = ichunk[i]-1;
       if (index < 0) continue;
-      if (rmass) massone = rmass[i];
-      else massone = mass[type[i]];
-
       // Calculate streaming velocity at the chunk's centre of mass and apply to all atoms in the chunk
       domain->x2lamda(comall[index], lamda);
       vstream[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
@@ -309,12 +312,12 @@ void ComputeTempDeformChunk::compute_vector()
       vthermal[0] = vcmall[index][0] - vstream[0];
       vthermal[1] = vcmall[index][1] - vstream[1];
       vthermal[2] = vcmall[index][2] - vstream[2];
-      t[0] += massone * vthermal[0] * vthermal[0];
-      t[1] += massone * vthermal[1] * vthermal[1];
-      t[2] += massone * vthermal[2] * vthermal[2];
-      t[3] += massone * vthermal[0] * vthermal[1];
-      t[4] += massone * vthermal[0] * vthermal[2];
-      t[5] += massone * vthermal[1] * vthermal[2];
+      t[0] += masstotal[index] * vthermal[0] * vthermal[0];
+      t[1] += masstotal[index] * vthermal[1] * vthermal[1];
+      t[2] += masstotal[index] * vthermal[2] * vthermal[2];
+      t[3] += masstotal[index] * vthermal[0] * vthermal[1];
+      t[4] += masstotal[index] * vthermal[0] * vthermal[2];
+      t[5] += masstotal[index] * vthermal[1] * vthermal[2];
     }
 
   // final KE
