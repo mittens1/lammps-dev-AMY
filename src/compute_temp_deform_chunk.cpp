@@ -179,6 +179,7 @@ double ComputeTempDeformChunk::compute_scalar()
 
   // calculate COM position for each chunk
   // This will be used to calculate the streaming velocity at the chunk's COM
+  // TODO EVK: Need to find a sensible caching strategy - too slow to recalculate every time
   vcm_compute();
   com_compute();
  
@@ -202,41 +203,23 @@ double ComputeTempDeformChunk::compute_scalar()
   double t = 0.0;
   int mycount = 0;
 
-  if (rmass) {
-    for (i = 0; i < nlocal; i++)
-      if (mask[i] & groupbit) {
-        index = ichunk[i]-1;
-        if (index < 0) continue;
-        // Calculate streaming velocity at the chunk's centre of mass and apply to all atoms in the chunk
-        domain->x2lamda(comall[index], lamda);
-        vstream[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
-        vstream[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
-        vstream[2] = h_rate[2] * lamda[2] + h_ratelo[2];
+  
+  for (i = 0; i < nlocal; i++) {
+    if (mask[i] & groupbit) {
+      index = ichunk[i]-1;
+      if (index < 0) continue;
+      // Calculate streaming velocity at the chunk's centre of mass and apply to all atoms in the chunk
+      domain->x2lamda(comall[index], lamda);
+      vstream[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
+      vstream[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
+      vstream[2] = h_rate[2] * lamda[2] + h_ratelo[2];
 
-        vthermal[0] = vcmall[index][0] - vstream[0];
-        vthermal[1] = vcmall[index][1] - vstream[1];
-        vthermal[2] = vcmall[index][2] - vstream[2];
-        // Use chunk mass when calculating the kinetic energy
-        t += (vthermal[0]*vthermal[0] + vthermal[1]*vthermal[1] + vthermal[2]*vthermal[2]) * masstotal[index];
-        mycount++;
-      }
-  } else {
-    for (i = 0; i < nlocal; i++)
-      if (mask[i] & groupbit) {
-        index = ichunk[i]-1;
-        if (index < 0) continue;
-        // Calculate streaming velocity at the chunk's centre of mass and apply to all atoms in the chunk
-        domain->x2lamda(comall[index], lamda);
-        vstream[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
-        vstream[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
-        vstream[2] = h_rate[2] * lamda[2] + h_ratelo[2];
-
-        vthermal[0] = vcmall[index][0] - vstream[0];
-        vthermal[1] = vcmall[index][1] - vstream[1];
-        vthermal[2] = vcmall[index][2] - vstream[2];
-        // Use chunk mass when calculating the kinetic energy
-        t += (vthermal[0]*vthermal[0] + vthermal[1]*vthermal[1] + vthermal[2]*vthermal[2]) * masstotal[index] ;
-        mycount++;
+      vthermal[0] = vcmall[index][0] - vstream[0];
+      vthermal[1] = vcmall[index][1] - vstream[1];
+      vthermal[2] = vcmall[index][2] - vstream[2];
+      // Use chunk mass when calculating the kinetic energy
+      t += (vthermal[0]*vthermal[0] + vthermal[1]*vthermal[1] + vthermal[2]*vthermal[2]) * masstotal[index];
+      mycount++;
     }
   }
 
@@ -275,9 +258,10 @@ void ComputeTempDeformChunk::compute_vector()
   if (nchunk > maxchunk) allocate();
 
   // calculate COM position and velocity for each chunk
-
-  com_compute();
+  // This will be used to calculate the streaming velocity at the chunk's COM
+  // TODO EVK: Need to find a sensible caching strategy - too slow to recalculate every time
   vcm_compute();
+  com_compute();
 
   // lamda = COM position in triclinic lamda coords
   // vstream = COM streaming velocity = Hrate*lamda + Hratelo. Will be the same for each atom in the chunk
@@ -299,7 +283,7 @@ void ComputeTempDeformChunk::compute_vector()
   for (i = 0; i < 6; i++) t[i] = 0.0;
 
  
-  for (i = 0; i < nlocal; i++)
+  for (i = 0; i < nlocal; i++) {
     if (mask[i] & groupbit) {
       index = ichunk[i]-1;
       if (index < 0) continue;
@@ -319,6 +303,7 @@ void ComputeTempDeformChunk::compute_vector()
       t[4] += masstotal[index] * vthermal[0] * vthermal[2];
       t[5] += masstotal[index] * vthermal[1] * vthermal[2];
     }
+  }
 
   // final KE
 

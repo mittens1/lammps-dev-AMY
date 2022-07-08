@@ -85,6 +85,8 @@ void FixNVTSllodChunk::init()
     error->all(FLERR,"Using fix nvt/sllod/chunk with no fix deform defined");
   
   // Chunk compute
+  if(idchunk == nullptr)
+    error->all(FLERR,"fix nvt/sllod/chunk does not use chunk/atom compute");
   int icompute = modify->find_compute(idchunk);
   if (icompute < 0)
     error->all(FLERR,"Chunk/atom compute does not exist for "
@@ -94,6 +96,8 @@ void FixNVTSllodChunk::init()
     error->all(FLERR,"fix nvt/sllod/chunk does not use chunk/atom compute");
 
   // Chunk VCM compute
+  if(idchunk == nullptr)
+    error->all(FLERR,"fix nvt/sllod/chunk does not use vcm/chunk compute");
   icompute = modify->find_compute(idvcm);
   if (icompute < 0)
     error->all(FLERR,"vcm/chunk compute does not exist for "
