@@ -22,12 +22,15 @@
 #include "atom_masks.h"
 #include "comm.h"
 #include "compute.h"
+#include "compute_chunk_atom.h"
+#include "compute_com_chunk.h"
 #include "domain.h"
 #include "error.h"
 #include "force.h"
 #include "kspace.h"
 #include "math_const.h"
 #include "memory.h"
+#include "modify.h"
 #include "neighbor.h"
 #include "suffix.h"
 #include "update.h"
@@ -923,6 +926,9 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
     }
   }
 
+  /*************************** EVK Debug ************************/
+  vflag_chunk = 1;
+
   // zero accumulators
   // use force->newton instead of newton_pair
   //   b/c some bonds/dihedrals call pair::ev_tally with pairwise info
@@ -963,6 +969,18 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
     }
   }
 
+  if (vflag_chunk && alloc) {
+    chunk_virial[0] = 0.0;
+    chunk_virial[1] = 0.0;
+    chunk_virial[2] = 0.0;
+    chunk_virial[3] = 0.0;
+    chunk_virial[4] = 0.0;
+    chunk_virial[5] = 0.0;
+    chunk_virial[6] = 0.0;
+    chunk_virial[7] = 0.0;
+    chunk_virial[8] = 0.0;
+    chunk_virial[9] = 0.0;
+  }
   // run ev_setup option for TALLY computes
 
   if (num_tally_compute > 0) {
@@ -1489,6 +1507,205 @@ void Pair::ev_tally_tip4p(int key, int *list, double *v,
     }
   }
 }
+
+/* ----------------------------------------------------------------------
+   tally eng_vdwl and virial into global or per-atom accumulators
+   for chunk/molecular virial, have delx,dely,delz and fx,fy,fz
+   and delcomx, delcomy, delcomz (chunk centre-of-mass separation)
+------------------------------------------------------------------------- */
+
+void Pair::ev_tally_chunk(int i, int j, int nlocal, int newton_pair,
+                          double evdwl, double ecoul, double fpair,
+                          double delx, double dely, double delz,
+                          double delcomx, double delcomy, double delcomz)
+{
+  double evdwlhalf,ecoulhalf,epairhalf,v[9];
+
+  if (eflag_either) {
+    if (eflag_global) {
+      if (newton_pair) {
+        eng_vdwl += evdwl;
+        eng_coul += ecoul;
+      } else {
+        evdwlhalf = 0.5*evdwl;
+        ecoulhalf = 0.5*ecoul;
+        if (i < nlocal) {
+          eng_vdwl += evdwlhalf;
+          eng_coul += ecoulhalf;
+        }
+        if (j < nlocal) {
+          eng_vdwl += evdwlhalf;
+          eng_coul += ecoulhalf;
+        }
+      }
+    }
+    if (eflag_atom) {
+      epairhalf = 0.5 * (evdwl + ecoul);
+      if (newton_pair || i < nlocal) eatom[i] += epairhalf;
+      if (newton_pair || j < nlocal) eatom[j] += epairhalf;
+    }
+  }
+
+  if (vflag_either) {
+    v[0] = delx*delx*fpair;
+    v[1] = dely*dely*fpair;
+    v[2] = delz*delz*fpair;
+    v[3] = delx*dely*fpair;
+    v[4] = delx*delz*fpair;
+    v[5] = dely*delz*fpair;
+    v[6] = dely*delx*fpair;
+    v[7] = delz*delx*fpair;
+    v[8] = delz*dely*fpair;
+
+    if (vflag_global) {
+      if (newton_pair) {
+        virial[0] += v[0];
+        virial[1] += v[1];
+        virial[2] += v[2];
+        virial[3] += v[3];
+        virial[4] += v[4];
+        virial[5] += v[5];
+      } else {
+        if (i < nlocal) {
+          virial[0] += 0.5*v[0];
+          virial[1] += 0.5*v[1];
+          virial[2] += 0.5*v[2];
+          virial[3] += 0.5*v[3];
+          virial[4] += 0.5*v[4];
+          virial[5] += 0.5*v[5];
+        }
+        if (j < nlocal) {
+          virial[0] += 0.5*v[0];
+          virial[1] += 0.5*v[1];
+          virial[2] += 0.5*v[2];
+          virial[3] += 0.5*v[3];
+          virial[4] += 0.5*v[4];
+          virial[5] += 0.5*v[5];
+        }
+      }
+    }
+
+    if (vflag_atom) {
+      if (newton_pair || i < nlocal) {
+        vatom[i][0] += 0.5*v[0];
+        vatom[i][1] += 0.5*v[1];
+        vatom[i][2] += 0.5*v[2];
+        vatom[i][3] += 0.5*v[3];
+        vatom[i][4] += 0.5*v[4];
+        vatom[i][5] += 0.5*v[5];
+      }
+      if (newton_pair || j < nlocal) {
+        vatom[j][0] += 0.5*v[0];
+        vatom[j][1] += 0.5*v[1];
+        vatom[j][2] += 0.5*v[2];
+        vatom[j][3] += 0.5*v[3];
+        vatom[j][4] += 0.5*v[4];
+        vatom[j][5] += 0.5*v[5];
+      }
+    }
+    
+    if (vflag_chunk) {
+      // Calculate the projection of the atomic separation onto the vector
+      // connecting the chunk centre-of-mass positions
+      double proj = (delx*delcomx + dely*delcomy + delz*delcomz)/
+                       (delx*delx + dely*dely + delz*delz);
+      if (newton_pair) {
+        chunk_virial[0] += v[0]/proj;
+        chunk_virial[1] += v[1]/proj;
+        chunk_virial[2] += v[2]/proj;
+        chunk_virial[3] += v[3]/proj;
+        chunk_virial[4] += v[4]/proj;
+        chunk_virial[5] += v[5]/proj;
+        chunk_virial[6] += v[6]/proj;
+        chunk_virial[7] += v[7]/proj;
+        chunk_virial[8] += v[8]/proj;
+      } else {
+        if (i < nlocal) {
+          chunk_virial[0] += 0.5*v[0]/proj;
+          chunk_virial[1] += 0.5*v[1]/proj;
+          chunk_virial[2] += 0.5*v[2]/proj;
+          chunk_virial[3] += 0.5*v[3]/proj;
+          chunk_virial[4] += 0.5*v[4]/proj;
+          chunk_virial[5] += 0.5*v[5]/proj;
+          chunk_virial[6] += 0.5*v[6]/proj;
+          chunk_virial[7] += 0.5*v[7]/proj;
+          chunk_virial[8] += 0.5*v[8]/proj;
+        }
+        if (j < nlocal) {
+          chunk_virial[0] += 0.5*v[0]/proj;
+          chunk_virial[1] += 0.5*v[1]/proj;
+          chunk_virial[2] += 0.5*v[2]/proj;
+          chunk_virial[3] += 0.5*v[3]/proj;
+          chunk_virial[4] += 0.5*v[4]/proj;
+          chunk_virial[5] += 0.5*v[5]/proj;
+          chunk_virial[6] += 0.5*v[6]/proj;
+          chunk_virial[7] += 0.5*v[7]/proj;
+          chunk_virial[8] += 0.5*v[8]/proj;
+        }
+      }
+    }
+  }
+}
+
+/* ----------------------------------------------------------------------
+   tally eng_vdwl and virial into global or per-atom accumulators
+   for chunk/molecular virial, have delx,dely,delz and fx,fy,fz
+   called when using full neighbor lists
+------------------------------------------------------------------------- */
+/*
+void Pair::ev_tally_chunk_full(int i, double evdwl, double ecoul,
+                               double fx, double fy, double fz,
+                               double delx, double dely, double delz,
+                               double delcomx, double delcomy, double delcomz)
+{
+  double evdwlhalf,ecoulhalf,epairhalf,v[6];
+
+  if (eflag_either) {
+    if (eflag_global) {
+      evdwlhalf = 0.5*evdwl;
+      ecoulhalf = 0.5*ecoul;
+      eng_vdwl += evdwlhalf;
+      eng_coul += ecoulhalf;
+    }
+    if (eflag_atom) {
+      epairhalf = 0.5 * (evdwl + ecoul);
+      eatom[i] += epairhalf;
+    }
+  }
+
+  // Calculate the projection of the atomic separation onto the vector
+  // connecting the chunk centre-of-mass positions
+  double scaling = (delx*delcomx + dely*delcomy + delz*delcomz)/
+                   (delx*delx + dely*dely + delz*delz);
+
+  if (vflag_either) {
+    v[0] = 0.5*delx*fx/scaling;
+    v[1] = 0.5*dely*fy/scaling;
+    v[2] = 0.5*delz*fz/scaling;
+    v[3] = 0.5*delx*fy/scaling;
+    v[4] = 0.5*delx*fz/scaling;
+    v[5] = 0.5*dely*fz/scaling;
+
+    if (vflag_global) {
+      virial[0] += v[0];
+      virial[1] += v[1];
+      virial[2] += v[2];
+      virial[3] += v[3];
+      virial[4] += v[4];
+      virial[5] += v[5];
+    }
+
+    if (vflag_atom) {
+      vatom[i][0] += v[0];
+      vatom[i][1] += v[1];
+      vatom[i][2] += v[2];
+      vatom[i][3] += v[3];
+      vatom[i][4] += v[4];
+      vatom[i][5] += v[5];
+    }
+  }
+}
+*/
 
 /* ----------------------------------------------------------------------
    tally virial into global or per-atom accumulators
