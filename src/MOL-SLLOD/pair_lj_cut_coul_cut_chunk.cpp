@@ -74,7 +74,25 @@ void PairLJCutCoulCutChunk::compute(int eflag, int vflag)
   double qtmp, xtmp, ytmp, ztmp, delx, dely, delz, evdwl, ecoul, fpair;
   double rsq, r2inv, r6inv, forcecoul, forcelj, factor_coul, factor_lj;
   int *ilist, *jlist, *numneigh, **firstneigh;
+  /****************** EVK DEBUG ******************/
+  idchunk = utils::strdup("molchunk");
+  idcom = utils::strdup("molcom");
 
+  int icompute = modify->find_compute(idchunk);
+  if (icompute < 0)
+    error->all(FLERR,"Chunk/atom compute does not exist for "
+               "pair lj/cut/coul/cut/chunk");
+  cchunk = dynamic_cast<ComputeChunkAtom *>( modify->compute[icompute]);
+  if (strcmp(cchunk->style,"chunk/atom") != 0)
+    error->all(FLERR,"pair lj/cut/coul/cut/chunk does not use chunk/atom compute");
+
+  icompute = modify->find_compute(idcom);
+  if (icompute < 0)
+    error->all(FLERR,"Chunk/atom compute does not exist for "
+               "pair lj/cut/coul/cut/chunk");
+  ccom = dynamic_cast<ComputeCOMChunk *>( modify->compute[icompute]);
+  if (strcmp(cchunk->style,"chunk/atom") != 0)
+    error->all(FLERR,"pair lj/cut/coul/cut/chunk does not use chunk/atom compute");
   evdwl = ecoul = 0.0;
   ev_init(eflag, vflag);
 
@@ -185,8 +203,10 @@ void PairLJCutCoulCutChunk::compute(int eflag, int vflag)
             evdwl = 0.0;
         }
 
-        if (evflag) ev_tally_chunk(i, j, nlocal, newton_pair, evdwl, ecoul, fpair, delx, dely, delz,
-                                   delcomx, delcomy, delcomz);
+        //if (evflag) ev_tally_chunk(i, j, nlocal, newton_pair, evdwl, ecoul, fpair, delx, dely, delz,
+        //                           delcomx, delcomy, delcomz);
+        ev_tally_chunk(i, j, nlocal, newton_pair, evdwl, ecoul, fpair, delx, dely, delz,
+                       delcomx, delcomy, delcomz);
       }
     }
   }
@@ -194,7 +214,9 @@ void PairLJCutCoulCutChunk::compute(int eflag, int vflag)
   if (vflag_fdotr) virial_fdotr_compute();
 }
 
-/* ---------------------------------------------------------------------- */
+/* ----------------------------------------------------------------------
+    Send Chunk IDs for ghost atoms
+   ---------------------------------------------------------------------- */
 
 int PairLJCutCoulCutChunk::pack_forward_comm(int n, int *list, double *buf, int /*pbc_flag*/,
                                             int * /*pbc*/)
@@ -308,6 +330,7 @@ void PairLJCutCoulCutChunk::init_style()
 
   /*********************** EVK DEBUG ********************/
   // TODO EVK: Make these input parameters
+  /*
   idchunk = utils::strdup("molchunk");
   idcom = utils::strdup("molcom");
 
@@ -326,6 +349,7 @@ void PairLJCutCoulCutChunk::init_style()
   ccom = dynamic_cast<ComputeCOMChunk *>( modify->compute[icompute]);
   if (strcmp(cchunk->style,"chunk/atom") != 0)
     error->all(FLERR,"pair lj/cut/coul/cut/chunk does not use chunk/atom compute");
+  */
 }
 
 /* ----------------------------------------------------------------------

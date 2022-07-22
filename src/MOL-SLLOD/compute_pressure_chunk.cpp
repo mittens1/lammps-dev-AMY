@@ -308,38 +308,34 @@ void ComputePressureChunk::compute_vector()
     ke_tensor[8] = temp_tensor[5];
   }
 
-  //if (dimension == 3) {
-  inv_volume = 1.0 / (domain->xprd * domain->yprd * domain->zprd);
-  // TODO: overhaul this to use chunks where appropriate
-  //virial_compute(6,3);
-  double *vchunk = force->pair->chunk_virial;
-  double v[9];
-  MPI_Allreduce(vchunk,v,9,MPI_DOUBLE,MPI_SUM,world);
-  if (keflag) {
-    for (int i = 0; i < 9; i++)
-      vector[i] = (ke_tensor[i] + v[i]) * inv_volume * nktv2p;
-  } else {
-    for (int i = 0; i < 9; i++) {
-      vector[i] = v[i] * inv_volume * nktv2p;
+  if (dimension == 3) {
+    inv_volume = 1.0 / (domain->xprd * domain->yprd * domain->zprd);
+    // TODO: overhaul this to use chunks where appropriate
+    //virial_compute(6,3);
+    double *vchunk = force->pair->chunk_virial;
+    double v[9];
+    MPI_Allreduce(vchunk,v,9,MPI_DOUBLE,MPI_SUM,world);
+    if (keflag) {
+      for (int i = 0; i < 9; i++)
+        vector[i] = (ke_tensor[i] + v[i]) * inv_volume * nktv2p;
+    } else {
+      for (int i = 0; i < 9; i++)
+        vector[i] = v[i] * inv_volume * nktv2p;
     }
-  }
-  /*
   } else {
     inv_volume = 1.0 / (domain->xprd * domain->yprd);
-    virial_compute(4,2);
+    double *vchunk = force->pair->chunk_virial;
+    double v[9];
+    MPI_Allreduce(vchunk,v,9,MPI_DOUBLE,MPI_SUM,world);
+
     if (keflag) {
-      vector[0] = (ke_tensor[0] + virial[0]) * inv_volume * nktv2p;
-      vector[1] = (ke_tensor[1] + virial[1]) * inv_volume * nktv2p;
-      vector[3] = (ke_tensor[3] + virial[3]) * inv_volume * nktv2p;
-      vector[2] = vector[4] = vector[5] = 0.0;
+      for (int i = 0; i < 9; i++)
+        vector[i] = (ke_tensor[i] + v[i]) * inv_volume * nktv2p;
     } else {
-      vector[0] = virial[0] * inv_volume * nktv2p;
-      vector[1] = virial[1] * inv_volume * nktv2p;
-      vector[3] = virial[3] * inv_volume * nktv2p;
-      vector[2] = vector[4] = vector[5] = 0.0;
+      for (int i = 0; i < 9; i++)
+        vector[i] = v[i] * inv_volume * nktv2p;
     }
   }
-    */
 }
 
 /* ---------------------------------------------------------------------- */
