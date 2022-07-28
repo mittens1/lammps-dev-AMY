@@ -898,7 +898,7 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
   if (vflag & VIRIAL_CENTROID && centroidstressflag != CENTROID_AVAIL) vflag_atom = 1;
   cvflag_atom = 0;
   if (vflag & VIRIAL_CENTROID && centroidstressflag == CENTROID_AVAIL) cvflag_atom = 1;
-  vflag_either = vflag_global || vflag_atom || cvflag_atom;
+  vflag_either = vflag_global || vflag_atom || cvflag_atom || vflag_chunk;
 
   evflag = eflag_either || vflag_either;
 
@@ -927,7 +927,7 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
   }
 
   /*************************** EVK Debug ************************/
-  vflag_chunk = 1;
+  //vflag_chunk = 1;
 
   // zero accumulators
   // use force->newton instead of newton_pair
@@ -969,7 +969,7 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
     }
   }
 
-  if (vflag_chunk && alloc) {
+  //if (vflag_chunk && alloc) {
     chunk_virial[0] = 0.0;
     chunk_virial[1] = 0.0;
     chunk_virial[2] = 0.0;
@@ -980,7 +980,7 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
     chunk_virial[7] = 0.0;
     chunk_virial[8] = 0.0;
     chunk_virial[9] = 0.0;
-  }
+  //}
   // run ev_setup option for TALLY computes
 
   if (num_tally_compute > 0) {
@@ -1546,102 +1546,51 @@ void Pair::ev_tally_chunk(int i, int j, int nlocal, int newton_pair,
     }
   }
 
-  if (vflag_either) {
-    v[0] = delx*delx*fpair;
-    v[1] = dely*dely*fpair;
-    v[2] = delz*delz*fpair;
-    v[3] = delx*dely*fpair;
-    v[4] = delx*delz*fpair;
-    v[5] = dely*delz*fpair;
-    v[6] = dely*delx*fpair;
-    v[7] = delz*delx*fpair;
-    v[8] = delz*dely*fpair;
-
-    if (vflag_global) {
-      if (newton_pair) {
-        virial[0] += v[0];
-        virial[1] += v[1];
-        virial[2] += v[2];
-        virial[3] += v[3];
-        virial[4] += v[4];
-        virial[5] += v[5];
-      } else {
-        if (i < nlocal) {
-          virial[0] += 0.5*v[0];
-          virial[1] += 0.5*v[1];
-          virial[2] += 0.5*v[2];
-          virial[3] += 0.5*v[3];
-          virial[4] += 0.5*v[4];
-          virial[5] += 0.5*v[5];
-        }
-        if (j < nlocal) {
-          virial[0] += 0.5*v[0];
-          virial[1] += 0.5*v[1];
-          virial[2] += 0.5*v[2];
-          virial[3] += 0.5*v[3];
-          virial[4] += 0.5*v[4];
-          virial[5] += 0.5*v[5];
-        }
-      }
-    }
-
-    if (vflag_atom) {
-      if (newton_pair || i < nlocal) {
-        vatom[i][0] += 0.5*v[0];
-        vatom[i][1] += 0.5*v[1];
-        vatom[i][2] += 0.5*v[2];
-        vatom[i][3] += 0.5*v[3];
-        vatom[i][4] += 0.5*v[4];
-        vatom[i][5] += 0.5*v[5];
-      }
-      if (newton_pair || j < nlocal) {
-        vatom[j][0] += 0.5*v[0];
-        vatom[j][1] += 0.5*v[1];
-        vatom[j][2] += 0.5*v[2];
-        vatom[j][3] += 0.5*v[3];
-        vatom[j][4] += 0.5*v[4];
-        vatom[j][5] += 0.5*v[5];
-      }
-    }
     
-    if (vflag_chunk) {
-      // Calculate the projection of the atomic separation onto the vector
-      // connecting the chunk centre-of-mass positions
-      double proj = (delx*delcomx + dely*delcomy + delz*delcomz)/
-                       (delx*delx + dely*dely + delz*delz);
-      if (newton_pair) {
-        chunk_virial[0] += v[0]/proj;
-        chunk_virial[1] += v[1]/proj;
-        chunk_virial[2] += v[2]/proj;
-        chunk_virial[3] += v[3]/proj;
-        chunk_virial[4] += v[4]/proj;
-        chunk_virial[5] += v[5]/proj;
-        chunk_virial[6] += v[6]/proj;
-        chunk_virial[7] += v[7]/proj;
-        chunk_virial[8] += v[8]/proj;
-      } else {
-        if (i < nlocal) {
-          chunk_virial[0] += 0.5*v[0]/proj;
-          chunk_virial[1] += 0.5*v[1]/proj;
-          chunk_virial[2] += 0.5*v[2]/proj;
-          chunk_virial[3] += 0.5*v[3]/proj;
-          chunk_virial[4] += 0.5*v[4]/proj;
-          chunk_virial[5] += 0.5*v[5]/proj;
-          chunk_virial[6] += 0.5*v[6]/proj;
-          chunk_virial[7] += 0.5*v[7]/proj;
-          chunk_virial[8] += 0.5*v[8]/proj;
-        }
-        if (j < nlocal) {
-          chunk_virial[0] += 0.5*v[0]/proj;
-          chunk_virial[1] += 0.5*v[1]/proj;
-          chunk_virial[2] += 0.5*v[2]/proj;
-          chunk_virial[3] += 0.5*v[3]/proj;
-          chunk_virial[4] += 0.5*v[4]/proj;
-          chunk_virial[5] += 0.5*v[5]/proj;
-          chunk_virial[6] += 0.5*v[6]/proj;
-          chunk_virial[7] += 0.5*v[7]/proj;
-          chunk_virial[8] += 0.5*v[8]/proj;
-        }
+  // if(vflag_chunk) {
+  if (true) {
+    v[0] = delcomx*delx*fpair;
+    v[1] = delcomy*dely*fpair;
+    v[2] = delcomz*delz*fpair;
+    v[3] = delcomx*dely*fpair;
+    v[4] = delcomx*delz*fpair;
+    v[5] = delcomy*delz*fpair;
+    v[6] = delcomy*delx*fpair;
+    v[7] = delcomz*delx*fpair;
+    v[8] = delcomz*dely*fpair;
+
+    if (newton_pair) {
+      chunk_virial[0] += v[0];
+      chunk_virial[1] += v[1];
+      chunk_virial[2] += v[2];
+      chunk_virial[3] += v[3];
+      chunk_virial[4] += v[4];
+      chunk_virial[5] += v[5];
+      chunk_virial[6] += v[6];
+      chunk_virial[7] += v[7];
+      chunk_virial[8] += v[8];
+    } else {
+      if (i < nlocal) {
+        chunk_virial[0] += 0.5*v[0];
+        chunk_virial[1] += 0.5*v[1];
+        chunk_virial[2] += 0.5*v[2];
+        chunk_virial[3] += 0.5*v[3];
+        chunk_virial[4] += 0.5*v[4];
+        chunk_virial[5] += 0.5*v[5];
+        chunk_virial[6] += 0.5*v[6];
+        chunk_virial[7] += 0.5*v[7];
+        chunk_virial[8] += 0.5*v[8];
+      }
+      if (j < nlocal) {
+        chunk_virial[0] += 0.5*v[0];
+        chunk_virial[1] += 0.5*v[1];
+        chunk_virial[2] += 0.5*v[2];
+        chunk_virial[3] += 0.5*v[3];
+        chunk_virial[4] += 0.5*v[4];
+        chunk_virial[5] += 0.5*v[5];
+        chunk_virial[6] += 0.5*v[6];
+        chunk_virial[7] += 0.5*v[7];
+        chunk_virial[8] += 0.5*v[8];
       }
     }
   }

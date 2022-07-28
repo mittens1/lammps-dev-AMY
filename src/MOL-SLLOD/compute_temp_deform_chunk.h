@@ -51,7 +51,7 @@ class ComputeTempDeformChunk : public Compute {
   int *which;
   char *idchunk;
   class ComputeChunkAtom *cchunk;
-  double adof, cdof;
+  double adof, cdof, tfactor;
   char *id_bias;
   class Compute *tbias;    // ptr to additional bias compute
   bigint comstep;
@@ -64,6 +64,7 @@ class ComputeTempDeformChunk : public Compute {
 
   void com_compute();
   void vcm_compute();
+  void dof_compute();
   void allocate();
 };
 

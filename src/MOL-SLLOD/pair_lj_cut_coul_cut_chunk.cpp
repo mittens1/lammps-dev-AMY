@@ -145,7 +145,6 @@ void PairLJCutCoulCutChunk::compute(int eflag, int vflag)
     jnum = numneigh[i];
 
     index_i = chunk_ID[i] - 1;
-    // TODO EVK: Do we want to skip this for atoms not in a molecule, or only the virial?
     if (index_i < 0) continue;
 
     for (jj = 0; jj < jnum; jj++) {
@@ -205,8 +204,10 @@ void PairLJCutCoulCutChunk::compute(int eflag, int vflag)
 
         //if (evflag) ev_tally_chunk(i, j, nlocal, newton_pair, evdwl, ecoul, fpair, delx, dely, delz,
         //                           delcomx, delcomy, delcomz);
-        ev_tally_chunk(i, j, nlocal, newton_pair, evdwl, ecoul, fpair, delx, dely, delz,
-                       delcomx, delcomy, delcomz);
+        if (index_i != index_j) {
+          ev_tally_chunk(i, j, nlocal, newton_pair, evdwl, ecoul, fpair, delx, dely, delz,
+                        delcomx, delcomy, delcomz);
+        }
       }
     }
   }

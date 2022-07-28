@@ -197,8 +197,9 @@ void ComputePressureChunk::init()
   nvirial = 0;
   vptr = nullptr;
 
-  if (pairhybridflag && force->pair) nvirial++;
+  //if (pairhybridflag && force->pair) nvirial++;
   if (pairflag && force->pair) nvirial++;
+  /*
   if (atom->molecular != Atom::ATOMIC) {
     if (bondflag && force->bond) nvirial++;
     if (angleflag && force->angle) nvirial++;
@@ -208,16 +209,19 @@ void ComputePressureChunk::init()
   if (fixflag)
     for (auto &ifix : modify->get_fix_list())
       if (ifix->thermo_virial) nvirial++;
-
+  */
   if (nvirial) {
     vptr = new double*[nvirial];
     nvirial = 0;
+    /*
     if (pairhybridflag && force->pair) {
       auto ph = dynamic_cast<PairHybrid *>( force->pair);
       ph->no_virial_fdotr_compute = 1;
       vptr[nvirial++] = pairhybrid->virial;
     }
+    */
     if (pairflag && force->pair) vptr[nvirial++] = force->pair->chunk_virial;
+    /*
     if (bondflag && force->bond) vptr[nvirial++] = force->bond->virial;
     if (angleflag && force->angle) vptr[nvirial++] = force->angle->virial;
     if (dihedralflag && force->dihedral)
@@ -228,6 +232,7 @@ void ComputePressureChunk::init()
     for (auto &ifix : modify->get_fix_list())
       if (ifix->virial_global_flag && ifix->thermo_virial)
           vptr[nvirial++] = ifix->virial;
+    */
   }
 
   // flag Kspace contribution separately, since not summed across procs
@@ -297,7 +302,7 @@ void ComputePressureChunk::compute_vector()
   if (keflag) {
     if (temperature->invoked_vector != update->ntimestep)
       temperature->compute_vector();
-    // TODO EVK: need to make this a 9x9 tensor
+    // TODO EVK: need to make this a 3x3 tensor
     temp_tensor = temperature->vector;
     // The kinetic energy tensor is symmetric by definition, but we still need the full 9 elements
     // so copy them and duplicate as necessary

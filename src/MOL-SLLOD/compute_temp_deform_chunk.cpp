@@ -163,7 +163,7 @@ void ComputeTempDeformChunk::init()
 
 double ComputeTempDeformChunk::compute_scalar()
 {
-  int i,index;
+  int i;
 
   // calculate chunk assignments,
   //   since only atoms in chunks contribute to global temperature
@@ -202,40 +202,36 @@ double ComputeTempDeformChunk::compute_scalar()
 
   double t = 0.0;
   int mycount = 0;
-
   
-  for (i = 0; i < nlocal; i++) {
-    if (mask[i] & groupbit) {
-      index = ichunk[i]-1;
-      if (index < 0) continue;
-      // Calculate streaming velocity at the chunk's centre of mass and apply to all atoms in the chunk
-      domain->x2lamda(comall[index], lamda);
-      vstream[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
-      vstream[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
-      vstream[2] = h_rate[2] * lamda[2] + h_ratelo[2];
+  // Already have the COM and VCM for every chunk (not just this processor's) so can just loop over
+  // all chunks without needing to collect per-processor results
+  for (i = 0; i < nchunk; i++) {
+    // Calculate streaming velocity at the chunk's centre of mass and apply to all atoms in the chunk
+    domain->x2lamda(comall[i], lamda);
+    vstream[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
+    vstream[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
+    vstream[2] = h_rate[2] * lamda[2] + h_ratelo[2];
 
-      vthermal[0] = vcmall[index][0] - vstream[0];
-      vthermal[1] = vcmall[index][1] - vstream[1];
-      vthermal[2] = vcmall[index][2] - vstream[2];
-      // Use chunk mass when calculating the kinetic energy
-      t += (vthermal[0]*vthermal[0] + vthermal[1]*vthermal[1] + vthermal[2]*vthermal[2]) * masstotal[index];
-      mycount++;
-    }
+    vthermal[0] = vcmall[i][0] - vstream[0];
+    vthermal[1] = vcmall[i][1] - vstream[1];
+    vthermal[2] = vcmall[i][2] - vstream[2];
+    // Use chunk mass when calculating the kinetic energy
+    t += (vthermal[0]*vthermal[0] + vthermal[1]*vthermal[1] + vthermal[2]*vthermal[2]) * masstotal[i];
   }
 
   // final temperature
 
-  MPI_Allreduce(&t,&scalar,1,MPI_DOUBLE,MPI_SUM,world);
-  double rcount = mycount;
-  double allcount;
-  MPI_Allreduce(&rcount,&allcount,1,MPI_DOUBLE,MPI_SUM,world);
+  //MPI_Allreduce(&t,&scalar,1,MPI_DOUBLE,MPI_SUM,world);
+  //double rcount = mycount;
+  //double allcount;
+  //MPI_Allreduce(&rcount,&allcount,1,MPI_DOUBLE,MPI_SUM,world);
+  //printf("proc %d: nchunk = %d, allcount = %d\n", comm->me, nchunk, allcount);
 
-  double dof = nchunk*cdof + adof*allcount;
-  double tfactor = 0.0;
-  if (dof > 0.0) tfactor = force->mvv2e / (dof * force->boltz);
-  if (dof < 0.0 && allcount > 0.0)
+  //double dof = nchunk*cdof + adof*allcount;
+  dof_compute();
+  if (dof < 0.0)
     error->all(FLERR,"Temperature compute degrees of freedom < 0");
-  scalar *= tfactor;
+  scalar = t*tfactor;
   return scalar;
 }
 
@@ -243,7 +239,7 @@ double ComputeTempDeformChunk::compute_scalar()
 
 void ComputeTempDeformChunk::compute_vector()
 {
-  int i,index;
+  int i;
 
   // calculate chunk assignments,
   //   since only atoms in chunks contribute to global temperature
@@ -283,32 +279,42 @@ void ComputeTempDeformChunk::compute_vector()
   for (i = 0; i < 6; i++) t[i] = 0.0;
 
  
-  for (i = 0; i < nlocal; i++) {
-    if (mask[i] & groupbit) {
-      index = ichunk[i]-1;
-      if (index < 0) continue;
+  for (i = 0; i < nchunk; i++) {
       // Calculate streaming velocity at the chunk's centre of mass and apply to all atoms in the chunk
-      domain->x2lamda(comall[index], lamda);
+      domain->x2lamda(comall[i], lamda);
       vstream[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
       vstream[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
       vstream[2] = h_rate[2] * lamda[2] + h_ratelo[2];
 
-      vthermal[0] = vcmall[index][0] - vstream[0];
-      vthermal[1] = vcmall[index][1] - vstream[1];
-      vthermal[2] = vcmall[index][2] - vstream[2];
-      t[0] += masstotal[index] * vthermal[0] * vthermal[0];
-      t[1] += masstotal[index] * vthermal[1] * vthermal[1];
-      t[2] += masstotal[index] * vthermal[2] * vthermal[2];
-      t[3] += masstotal[index] * vthermal[0] * vthermal[1];
-      t[4] += masstotal[index] * vthermal[0] * vthermal[2];
-      t[5] += masstotal[index] * vthermal[1] * vthermal[2];
+      vthermal[0] = vcmall[i][0] - vstream[0];
+      vthermal[1] = vcmall[i][1] - vstream[1];
+      vthermal[2] = vcmall[i][2] - vstream[2];
+      t[0] += masstotal[i] * vthermal[0] * vthermal[0];
+      t[1] += masstotal[i] * vthermal[1] * vthermal[1];
+      t[2] += masstotal[i] * vthermal[2] * vthermal[2];
+      t[3] += masstotal[i] * vthermal[0] * vthermal[1];
+      t[4] += masstotal[i] * vthermal[0] * vthermal[2];
+      t[5] += masstotal[i] * vthermal[1] * vthermal[2];
     }
-  }
-
   // final KE
-
-  MPI_Allreduce(t,vector,6,MPI_DOUBLE,MPI_SUM,world);
+  //MPI_Allreduce(t,vector,6,MPI_DOUBLE,MPI_SUM,world);
   for (i = 0; i < 6; i++) vector[i] *= force->mvv2e;
+}
+
+
+/* ----------------------------------------------------------------------
+   Degrees of freedom for chunk temperature
+------------------------------------------------------------------------- */
+
+void ComputeTempDeformChunk::dof_compute()
+{
+  adjust_dof_fix();
+  dof = domain->dimension * nchunk;
+  dof -= extra_dof + fix_dof;
+  if (dof > 0)
+    tfactor = force->mvv2e / (dof * force->boltz);
+  else
+    tfactor = 0.0;
 }
 
 /* ----------------------------------------------------------------------
