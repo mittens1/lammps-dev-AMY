@@ -62,7 +62,7 @@ class ComputeTempDeformChunk : public Compute {
   double **com, **comall;
   double **vcm, **vcmall;
 
-  void com_compute();
+  void com_vcm_compute();
   void vcm_compute();
   void dof_compute();
   void allocate();

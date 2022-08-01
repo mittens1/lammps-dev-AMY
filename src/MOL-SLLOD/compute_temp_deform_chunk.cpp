@@ -180,8 +180,7 @@ double ComputeTempDeformChunk::compute_scalar()
   // calculate COM position for each chunk
   // This will be used to calculate the streaming velocity at the chunk's COM
   // TODO EVK: Need to find a sensible caching strategy - too slow to recalculate every time
-  vcm_compute();
-  com_compute();
+  com_vcm_compute();
  
   // lamda = COM position in triclinic lamda coords
   // vstream = COM streaming velocity = Hrate*lamda + Hratelo. Will be the same for each atom in the chunk
@@ -256,8 +255,7 @@ void ComputeTempDeformChunk::compute_vector()
   // calculate COM position and velocity for each chunk
   // This will be used to calculate the streaming velocity at the chunk's COM
   // TODO EVK: Need to find a sensible caching strategy - too slow to recalculate every time
-  vcm_compute();
-  com_compute();
+  com_vcm_compute();
 
   // lamda = COM position in triclinic lamda coords
   // vstream = COM streaming velocity = Hrate*lamda + Hratelo. Will be the same for each atom in the chunk
@@ -308,6 +306,7 @@ void ComputeTempDeformChunk::compute_vector()
 
 void ComputeTempDeformChunk::dof_compute()
 {
+  nchunk = cchunk->setup_chunks();
   adjust_dof_fix();
   dof = domain->dimension * nchunk;
   dof -= extra_dof + fix_dof;
@@ -318,10 +317,10 @@ void ComputeTempDeformChunk::dof_compute()
 }
 
 /* ----------------------------------------------------------------------
-   calculate COM for each chunk
+   calculate COM and VCM for each chunk
 ------------------------------------------------------------------------- */
 
-void ComputeTempDeformChunk::com_compute()
+void ComputeTempDeformChunk::com_vcm_compute()
 {
   int index;
   double massone;
@@ -340,13 +339,16 @@ void ComputeTempDeformChunk::com_compute()
 
   // zero local per-chunk values
 
-  for (int i = 0; i < nchunk; i++)
+  for (int i = 0; i < nchunk; i++){
     com[i][0] = com[i][1] = com[i][2] = 0.0;
-  for (int i = 0; i < nchunk; i++) massproc[i] = 0.0;
+    vcm[i][0] = vcm[i][1] = vcm[i][2] = 0.0;
+    massproc[i] = 0.0;
+  }
 
-  // compute COM for each chunk
+  // compute COM and VCM for each chunk
 
   double **x = atom->x;
+  double **v = atom->v;
   int *mask = atom->mask;
   int *type = atom->type;
   imageint *image = atom->image;
@@ -364,10 +366,14 @@ void ComputeTempDeformChunk::com_compute()
       com[index][0] += unwrap[0] * massone;
       com[index][1] += unwrap[1] * massone;
       com[index][2] += unwrap[2] * massone;
+      vcm[index][0] += v[i][0] * massone;
+      vcm[index][1] += v[i][1] * massone;
+      vcm[index][2] += v[i][2] * massone;
       massproc[index] += massone;
     }
 
   MPI_Allreduce(&com[0][0],&comall[0][0],3*nchunk,MPI_DOUBLE,MPI_SUM,world);
+  MPI_Allreduce(&vcm[0][0],&vcmall[0][0],3*nchunk,MPI_DOUBLE,MPI_SUM,world);
   MPI_Allreduce(massproc,masstotal,nchunk,MPI_DOUBLE,MPI_SUM,world);
 
   for (int i = 0; i < nchunk; i++) {
@@ -375,61 +381,15 @@ void ComputeTempDeformChunk::com_compute()
       comall[i][0] /= masstotal[i];
       comall[i][1] /= masstotal[i];
       comall[i][2] /= masstotal[i];
-    } else comall[i][0] = comall[i][1] = comall[i][2] = 0.0;
-  }
-}
-
-/* ----------------------------------------------------------------------
-   calculate velocity of COM for each chunk
-------------------------------------------------------------------------- */
-
-void ComputeTempDeformChunk::vcm_compute()
-{
-  int i,index;
-  double massone;
-
-  nchunk = cchunk->setup_chunks();
-  cchunk->compute_ichunk();
-  int *ichunk = cchunk->ichunk;
-
-  for (i = 0; i < nchunk; i++) {
-    vcm[i][0] = vcm[i][1] = vcm[i][2] = 0.0;
-    massproc[i] = 0.0;
-  }
-
-  double **v = atom->v;
-  int *mask = atom->mask;
-  int *type = atom->type;
-  double *mass = atom->mass;
-  double *rmass = atom->rmass;
-  int nlocal = atom->nlocal;
-
-  for (i = 0; i < nlocal; i++)
-    if (mask[i] & groupbit) {
-      index = ichunk[i]-1;
-      if (index < 0) continue;
-      if (rmass) massone = rmass[i];
-      else massone = mass[type[i]];
-      vcm[index][0] += v[i][0] * massone;
-      vcm[index][1] += v[i][1] * massone;
-      vcm[index][2] += v[i][2] * massone;
-      massproc[index] += massone;
-    }
-
-  MPI_Allreduce(&vcm[0][0],&vcmall[0][0],3*nchunk,MPI_DOUBLE,MPI_SUM,world);
-  MPI_Allreduce(massproc,masstotal,nchunk,MPI_DOUBLE,MPI_SUM,world);
-
-  for (i = 0; i < nchunk; i++) {
-    if (masstotal[i] > 0.0) {
       vcmall[i][0] /= masstotal[i];
       vcmall[i][1] /= masstotal[i];
       vcmall[i][2] /= masstotal[i];
     } else {
+      comall[i][0] = comall[i][1] = comall[i][2] = 0.0;
       vcmall[i][0] = vcmall[i][1] = vcmall[i][2] = 0.0;
     }
   }
 }
-
 
 /* ----------------------------------------------------------------------
    bias methods: called by thermostats
