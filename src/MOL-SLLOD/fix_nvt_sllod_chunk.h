@@ -32,6 +32,9 @@ class FixNVTSllodChunk : public FixNH {
 
  private:
   int nondeformbias;
+  int nchunk, maxchunk;
+  double **vcm, **vcmall;
+  double *massproc, *masstotal;
 
   void nh_v_temp() override;
   void vcm_compute();

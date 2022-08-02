@@ -29,6 +29,7 @@
 #include "group.h"
 #include "math_extra.h"
 #include "modify.h"
+#include "memory.h"
 
 #include <cstring>
 
@@ -57,12 +58,24 @@ FixNVTSllodChunk::FixNVTSllodChunk(LAMMPS *lmp, int narg, char **arg) :
   modify->add_compute(fmt::format("{} {} temp/deform",
                                   id_temp,group->names[igroup]));
   tcomputeflag = 1;
+  maxchunk = 0;
+  vcm = nullptr;
+  vcmall = nullptr;
+  masstotal = nullptr;
+  massproc = nullptr;
+}
+
+/* ---------------------------------------------------------------------- */
+FixNVTSllodChunk::~FixNVTSllodChunk() {
+  memory->destroy(vcm);
+  memory->destroy(vcmall);
+  memory->destroy(massproc);
+  memory->destroy(masstotal);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void FixNVTSllodChunk::init()
-{
+void FixNVTSllodChunk::init() {
   FixNH::init();
 
   if (!temperature->tempbias)
@@ -112,8 +125,7 @@ void FixNVTSllodChunk::init()
    perform half-step scaling of velocities
 -----------------------------------------------------------------------*/
 
-void FixNVTSllodChunk::nh_v_temp()
-{
+void FixNVTSllodChunk::nh_v_temp() {
   // remove and restore bias = streaming velocity = Hrate*lamda + Hratelo
   // thermostat thermal velocity only
   // vdelu = SLLOD correction = Hrate*Hinv*vthermal
@@ -124,9 +136,10 @@ void FixNVTSllodChunk::nh_v_temp()
   if (nondeformbias) temperature->compute_scalar();
 
   // Use molecular/chunk centre-of-mass velocity when calculating SLLOD correction
-  cvcm->compute_array();
-  double **vcm = cvcm->array;
-  int nchunk = cchunk->setup_chunks();
+  //cvcm->compute_array();
+  //double **vcm = cvcm->array;
+  vcm_compute();
+  nchunk = cchunk->setup_chunks();
   cchunk->compute_ichunk();
   int *ichunk = cchunk->ichunk;
   int index;
@@ -144,14 +157,93 @@ void FixNVTSllodChunk::nh_v_temp()
     if (mask[i] & groupbit) {
       index = ichunk[i]-1;
       if (index < 0) continue;
-      vdelu[0] = h_two[0]*vcm[index][0] + h_two[5]*vcm[index][1] + h_two[4]*vcm[index][2];
-      vdelu[1] = h_two[1]*vcm[index][1] + h_two[3]*vcm[index][2];
-      vdelu[2] = h_two[2]*vcm[index][2];
+      vdelu[0] = h_two[0]*vcmall[index][0] + h_two[5]*vcmall[index][1] + h_two[4]*vcmall[index][2];
+      vdelu[1] = h_two[1]*vcmall[index][1] + h_two[3]*vcmall[index][2];
+      vdelu[2] = h_two[2]*vcmall[index][2];
       temperature->remove_bias(i,v[i]);
       v[i][0] = v[i][0]*factor_eta - dthalf*vdelu[0];
       v[i][1] = v[i][1]*factor_eta - dthalf*vdelu[1];
       v[i][2] = v[i][2]*factor_eta - dthalf*vdelu[2];
       temperature->restore_bias(i,v[i]);
+    }
+  }
+}
+
+void FixNVTSllodChunk::vcm_compute() {
+  int index;
+  double massone;
+
+  // compute chunk/atom assigns atoms to chunk IDs
+  // extract ichunk index vector from compute
+  // ichunk = 1 to Nchunk for included atoms, 0 for excluded atoms
+  nchunk = cchunk->setup_chunks();
+  cchunk->compute_ichunk();
+  int *ichunk = cchunk->ichunk;
+
+  if (nchunk > maxchunk) {
+    maxchunk = nchunk;
+    memory->destroy(vcm);
+    memory->destroy(vcmall);
+    memory->destroy(massproc);
+    memory->destroy(masstotal);
+    memory->create(vcm,maxchunk,3,"nvt/sllod/chunk:vcm");
+    memory->create(vcmall,maxchunk,3,"nvt/sllod/chunk:vcmall");
+    memory->create(massproc,maxchunk,"nvt/sllod/chunk:massproc");
+    memory->create(masstotal,maxchunk,"nvt/sllod/chunk:masstotal");
+  }
+  size_array_rows = nchunk;
+
+  // zero local per-chunk values
+
+  for (int i = 0; i < nchunk; i++){
+    vcm[i][0] = vcm[i][1] = vcm[i][2] = 0.0;
+    massproc[i] = 0.0;
+  }
+
+  // compute COM and VCM for each chunk
+
+  double **v = atom->v;
+  int *mask = atom->mask;
+  int *type = atom->type;
+
+  imageint *image = atom->image;
+  int xbox, ybox, zbox;
+  double v_adjust[3];
+
+  double *mass = atom->mass;
+  double *rmass = atom->rmass;
+  int nlocal = atom->nlocal;
+
+  for (int i = 0; i < nlocal; i++)
+    if (mask[i] & groupbit) {
+      index = ichunk[i]-1;
+      if (index < 0) continue;
+      if (rmass) massone = rmass[i];
+      else massone = mass[type[i]];
+      // Adjust the velocity to reflect the streaming velocity at the unwrapped coordinates
+      xbox = (image[i] & IMGMASK) - IMGMAX;
+      ybox = (image[i] >> IMGBITS & IMGMASK) - IMGMAX;
+      zbox = (image[i] >> IMG2BITS) - IMGMAX;
+      v_adjust[0] = xbox*domain->h_rate[0] + ybox*domain->h_rate[5] + zbox*domain->h_rate[4];
+      v_adjust[1] = ybox*domain->h_rate[1] + zbox*domain->h_rate[3];
+      v_adjust[2] = zbox*domain->h_rate[2];
+      //std::cout << "x: " << x[i][0] << " " << x[i][1] << " " << x[i][2] << " I: " << xbox << " " << ybox << " " << zbox << " v: " << v_adjust[0] << " " << v_adjust[1] << " " << v_adjust[2] << std::endl;
+      vcm[index][0] += (v[i][0] + v_adjust[0]) * massone;
+      vcm[index][1] += (v[i][1] + v_adjust[1]) * massone;
+      vcm[index][2] += (v[i][2] + v_adjust[2]) * massone;
+      massproc[index] += massone;
+    }
+
+  MPI_Allreduce(&vcm[0][0],&vcmall[0][0],3*nchunk,MPI_DOUBLE,MPI_SUM,world);
+  MPI_Allreduce(massproc,masstotal,nchunk,MPI_DOUBLE,MPI_SUM,world);
+
+  for (int i = 0; i < nchunk; i++) {
+    if (masstotal[i] > 0.0) {
+      vcmall[i][0] /= masstotal[i];
+      vcmall[i][1] /= masstotal[i];
+      vcmall[i][2] /= masstotal[i];
+    } else {
+      vcmall[i][0] = vcmall[i][1] = vcmall[i][2] = 0.0;
     }
   }
 }

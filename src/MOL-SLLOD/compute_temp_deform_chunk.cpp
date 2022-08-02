@@ -31,6 +31,7 @@
 #include "update.h"
 
 #include <cstring>
+#include <iostream>
 
 using namespace LAMMPS_NS;
 
@@ -351,7 +352,11 @@ void ComputeTempDeformChunk::com_vcm_compute()
   double **v = atom->v;
   int *mask = atom->mask;
   int *type = atom->type;
+
   imageint *image = atom->image;
+  int xbox, ybox, zbox;
+  double v_adjust[3];
+
   double *mass = atom->mass;
   double *rmass = atom->rmass;
   int nlocal = atom->nlocal;
@@ -362,13 +367,23 @@ void ComputeTempDeformChunk::com_vcm_compute()
       if (index < 0) continue;
       if (rmass) massone = rmass[i];
       else massone = mass[type[i]];
+      
+      // Have to compute COM in unwrapped coordinates
       domain->unmap(x[i],image[i],unwrap);
       com[index][0] += unwrap[0] * massone;
       com[index][1] += unwrap[1] * massone;
       com[index][2] += unwrap[2] * massone;
-      vcm[index][0] += v[i][0] * massone;
-      vcm[index][1] += v[i][1] * massone;
-      vcm[index][2] += v[i][2] * massone;
+      // Now adjust the velocity to reflect the streaming velocity at the unwrapped coordinates
+      xbox = (image[i] & IMGMASK) - IMGMAX;
+      ybox = (image[i] >> IMGBITS & IMGMASK) - IMGMAX;
+      zbox = (image[i] >> IMG2BITS) - IMGMAX;
+      v_adjust[0] = xbox*domain->h_rate[0] + ybox*domain->h_rate[5] + zbox*domain->h_rate[4];
+      v_adjust[1] = ybox*domain->h_rate[1] + zbox*domain->h_rate[3];
+      v_adjust[2] = zbox*domain->h_rate[2];
+      //std::cout << "x: " << x[i][0] << " " << x[i][1] << " " << x[i][2] << " I: " << xbox << " " << ybox << " " << zbox << " v: " << v_adjust[0] << " " << v_adjust[1] << " " << v_adjust[2] << std::endl;
+      vcm[index][0] += (v[i][0] + v_adjust[0]) * massone;
+      vcm[index][1] += (v[i][1] + v_adjust[1]) * massone;
+      vcm[index][2] += (v[i][2] + v_adjust[2]) * massone;
       massproc[index] += massone;
     }
 
