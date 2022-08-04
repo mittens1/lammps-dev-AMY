@@ -27,6 +27,7 @@ namespace LAMMPS_NS {
 class FixNVTSllodChunk : public FixNH {
  public:
   FixNVTSllodChunk(class LAMMPS *, int, char **);
+  ~FixNVTSllodChunk();
 
   void init() override;
 
