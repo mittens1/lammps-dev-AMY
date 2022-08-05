@@ -93,6 +93,8 @@ void PairLJCutCoulCutChunk::compute(int eflag, int vflag)
   ccom = dynamic_cast<ComputeCOMChunk *>( modify->compute[icompute]);
   if (strcmp(cchunk->style,"chunk/atom") != 0)
     error->all(FLERR,"pair lj/cut/coul/cut/chunk does not use chunk/atom compute");
+  /****************** EVK DEBUG ******************/
+
   evdwl = ecoul = 0.0;
   ev_init(eflag, vflag);
 
