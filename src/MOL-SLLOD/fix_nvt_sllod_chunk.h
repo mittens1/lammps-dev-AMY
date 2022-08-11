@@ -38,7 +38,7 @@ class FixNVTSllodChunk : public FixNH {
   double *massproc, *masstotal;
 
   void nh_v_temp() override;
-  void vcm_compute();
+  void vcm_thermal_compute();
 
   class ComputeChunkAtom *cchunk;
   class ComputeVCMChunk *cvcm;

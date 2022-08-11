@@ -136,40 +136,43 @@ void FixNVTSllodChunk::nh_v_temp() {
   if (nondeformbias) temperature->compute_scalar();
 
   // Use molecular/chunk centre-of-mass velocity when calculating SLLOD correction
-  //cvcm->compute_array();
-  //double **vcm = cvcm->array;
-  vcm_compute();
+  vcm_thermal_compute();
   nchunk = cchunk->setup_chunks();
   cchunk->compute_ichunk();
   int *ichunk = cchunk->ichunk;
   int index;
 
+
   double **v = atom->v;
   int *mask = atom->mask;
+  int *type = atom->type;
+  double *mass = atom->mass;
+  double *rmass = atom->rmass;
+  double massone;
   int nlocal = atom->nlocal;
   if (igroup == atom->firstgroup) nlocal = atom->nfirst;
 
   double h_two[6],vdelu[3];
   MathExtra::multiply_shape_shape(domain->h_rate,domain->h_inv,h_two);
 
-  // TODO EVK: do we need to rescale by the molecular mass here?
   for (int i = 0; i < nlocal; i++) {
     if (mask[i] & groupbit) {
       index = ichunk[i]-1;
       if (index < 0) continue;
+      // NOTE: This uses the thermal velocity of the chunk centre-of-mass in all cases
       vdelu[0] = h_two[0]*vcmall[index][0] + h_two[5]*vcmall[index][1] + h_two[4]*vcmall[index][2];
       vdelu[1] = h_two[1]*vcmall[index][1] + h_two[3]*vcmall[index][2];
       vdelu[2] = h_two[2]*vcmall[index][2];
       temperature->remove_bias(i,v[i]);
-      v[i][0] = v[i][0]*factor_eta - dthalf*vdelu[0];
-      v[i][1] = v[i][1]*factor_eta - dthalf*vdelu[1];
-      v[i][2] = v[i][2]*factor_eta - dthalf*vdelu[2];
+      v[i][0] = vcmall[index][0]*factor_eta - dthalf*vdelu[0];
+      v[i][1] = vcmall[index][1]*factor_eta - dthalf*vdelu[1];
+      v[i][2] = vcmall[index][2]*factor_eta - dthalf*vdelu[2];
       temperature->restore_bias(i,v[i]);
     }
   }
 }
 
-void FixNVTSllodChunk::vcm_compute() {
+void FixNVTSllodChunk::vcm_thermal_compute() {
   int index;
   double massone;
 
@@ -191,7 +194,6 @@ void FixNVTSllodChunk::vcm_compute() {
     memory->create(massproc,maxchunk,"nvt/sllod/chunk:massproc");
     memory->create(masstotal,maxchunk,"nvt/sllod/chunk:masstotal");
   }
-  size_array_rows = nchunk;
 
   // zero local per-chunk values
 
@@ -218,22 +220,21 @@ void FixNVTSllodChunk::vcm_compute() {
     if (mask[i] & groupbit) {
       index = ichunk[i]-1;
       if (index < 0) continue;
-      if (rmass) massone = rmass[i];
-      else massone = mass[type[i]];
-      // Adjust the velocity to reflect the streaming velocity at the unwrapped coordinates
-      xbox = (image[i] & IMGMASK) - IMGMAX;
-      ybox = (image[i] >> IMGBITS & IMGMASK) - IMGMAX;
-      zbox = (image[i] >> IMG2BITS) - IMGMAX;
-      v_adjust[0] = xbox*domain->h_rate[0] + ybox*domain->h_rate[5] + zbox*domain->h_rate[4];
-      v_adjust[1] = ybox*domain->h_rate[1] + zbox*domain->h_rate[3];
-      v_adjust[2] = zbox*domain->h_rate[2];
-      //std::cout << "x: " << x[i][0] << " " << x[i][1] << " " << x[i][2] << " I: " << xbox << " " << ybox << " " << zbox << " v: " << v_adjust[0] << " " << v_adjust[1] << " " << v_adjust[2] << std::endl;
-      vcm[index][0] += (v[i][0] + v_adjust[0]) * massone;
-      vcm[index][1] += (v[i][1] + v_adjust[1]) * massone;
-      vcm[index][2] += (v[i][2] + v_adjust[2]) * massone;
+      if (rmass) {
+        massone = rmass[i];
+      } else {
+        massone = mass[type[i]];
+      }
+      // Adjust the velocity to reflect the thermal velocity 
+      temperature->remove_bias(i, v[i]);
+      vcm[index][0] += v[i][0] * massone;
+      vcm[index][1] += v[i][1] * massone;
+      vcm[index][2] += v[i][2] * massone;
       massproc[index] += massone;
+      temperature->restore_bias(i, v[i]);
     }
 
+  // TODO EVK: This should probably be cached/re-used between styles (e.g. thermostat)
   MPI_Allreduce(&vcm[0][0],&vcmall[0][0],3*nchunk,MPI_DOUBLE,MPI_SUM,world);
   MPI_Allreduce(massproc,masstotal,nchunk,MPI_DOUBLE,MPI_SUM,world);
 
