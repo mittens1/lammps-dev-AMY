@@ -46,7 +46,7 @@ class ComputeTempDeformChunk : public Compute {
   double memory_usage() override;
 
  private:
-  int nchunk, maxchunk, comflag, biasflag;
+  int nchunk, maxchunk, comflag, biasflag, nmax;
   int nvalues;
   int *which;
   char *idchunk;
@@ -61,9 +61,10 @@ class ComputeTempDeformChunk : public Compute {
   double *massproc, *masstotal;
   double **com, **comall;
   double **vcm, **vcmall;
+  double **vthermal;
 
-  void com_vcm_compute();
-  void vcm_compute();
+  void com_compute();
+  void vcm_thermal_compute();
   void dof_compute();
   void allocate();
 };

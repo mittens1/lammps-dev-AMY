@@ -31,18 +31,16 @@
 #include "update.h"
 
 #include <cstring>
-#include <iostream>
 
 using namespace LAMMPS_NS;
-
-enum{TEMP,KECOM,INTERNAL};
 
 /* ---------------------------------------------------------------------- */
 
 ComputeTempDeformChunk::ComputeTempDeformChunk(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg),
   which(nullptr), idchunk(nullptr), id_bias(nullptr), sum(nullptr), sumall(nullptr), count(nullptr),
-  countall(nullptr), massproc(nullptr), masstotal(nullptr), vcm(nullptr), vcmall(nullptr)
+  countall(nullptr), massproc(nullptr), masstotal(nullptr), vcm(nullptr), vcmall(nullptr),
+  com(nullptr), comall(nullptr)
 {
   if (narg < 4) error->all(FLERR,"Illegal compute temp/chunk/deform command");
 
@@ -53,6 +51,7 @@ ComputeTempDeformChunk::ComputeTempDeformChunk(LAMMPS *lmp, int narg, char **arg
   tempflag = 1;
   tempbias = 1;
   vbiasall = nullptr;
+  vthermal = nullptr;
 
   // ID of compute chunk/atom
 
@@ -72,10 +71,10 @@ ComputeTempDeformChunk::ComputeTempDeformChunk(LAMMPS *lmp, int narg, char **arg
 
   comflag = 0;
   biasflag = 0;
-  id_bias = nullptr;
   adof = domain->dimension;
   cdof = 0.0;
 
+  /*
   while (iarg < narg) {
     if (strcmp(arg[iarg],"com") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal compute temp/chunk/deform command");
@@ -96,15 +95,12 @@ ComputeTempDeformChunk::ComputeTempDeformChunk(LAMMPS *lmp, int narg, char **arg
       iarg += 2;
     } else error->all(FLERR,"Illegal compute temp/chunk/deform command");
   }
+  */
 
   // vector data
 
   vector = new double[size_vector];
 
-  // chunk-based data
-
-  nchunk = 1;
-  maxchunk = 0;
 
   if (nvalues)  {
     array_flag = 1;
@@ -114,6 +110,10 @@ ComputeTempDeformChunk::ComputeTempDeformChunk(LAMMPS *lmp, int narg, char **arg
     extarray = 0;
   }
 
+  // chunk-based data
+  nchunk = 1;
+  maxchunk = 0;
+  nmax = 0;
   allocate();
   comstep = -1;
 }
@@ -138,6 +138,7 @@ ComputeTempDeformChunk::~ComputeTempDeformChunk()
   memory->destroy(vcm);
   memory->destroy(vcmall);
   memory->destroy(vbiasall);
+  memory->destroy(vthermal);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -176,17 +177,19 @@ double ComputeTempDeformChunk::compute_scalar()
   cchunk->compute_ichunk();
   int *ichunk = cchunk->ichunk;
 
-  if (nchunk > maxchunk) allocate();
+  if ((nchunk > maxchunk) || (atom->nlocal > nmax)) allocate();
 
   // calculate COM position for each chunk
   // This will be used to calculate the streaming velocity at the chunk's COM
   // TODO EVK: Need to find a sensible caching strategy - too slow to recalculate every time
-  com_vcm_compute();
+  if(comstep != update->ntimestep) {
+    com_compute();
+  }
  
   // lamda = COM position in triclinic lamda coords
   // vstream = COM streaming velocity = Hrate*lamda + Hratelo. Will be the same for each atom in the chunk
   // vthermal = thermal velocity = v - vstream
-  double lamda[3], vstream[3], vthermal[3];
+  double lamda[3], vstream_chunk[3], vstream_atom[3];
 
   double *h_rate = domain->h_rate;
   double *h_ratelo = domain->h_ratelo;
@@ -198,36 +201,57 @@ double ComputeTempDeformChunk::compute_scalar()
   double *rmass = atom->rmass;
   int *type = atom->type;
   int *mask = atom->mask;
-  const int nlocal = atom->nlocal;
+  int nlocal = atom->nlocal;
+  int index;
+  int xbox, ybox, zbox;
+  imageint *image = atom->image;
 
   double t = 0.0;
   int mycount = 0;
-  
-  // Already have the COM and VCM for every chunk (not just this processor's) so can just loop over
-  // all chunks without needing to collect per-processor results
-  for (i = 0; i < nchunk; i++) {
-    // Calculate streaming velocity at the chunk's centre of mass and apply to all atoms in the chunk
-    domain->x2lamda(comall[i], lamda);
-    vstream[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
-    vstream[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
-    vstream[2] = h_rate[2] * lamda[2] + h_ratelo[2];
+ 
+  for (i = 0; i < atom->nlocal; i++) {
+    if (mask[i] & groupbit) {
+      index = ichunk[i]-1;
+      if (index < 0) continue;
 
-    vthermal[0] = vcmall[i][0] - vstream[0];
-    vthermal[1] = vcmall[i][1] - vstream[1];
-    vthermal[2] = vcmall[i][2] - vstream[2];
-    // Use chunk mass when calculating the kinetic energy
-    t += (vthermal[0]*vthermal[0] + vthermal[1]*vthermal[1] + vthermal[2]*vthermal[2]) * masstotal[i];
+      // Calculate streaming velocity at the chunk's centre of mass 
+      domain->x2lamda(comall[index], lamda);
+      vstream_chunk[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
+      vstream_chunk[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
+      vstream_chunk[2] = h_rate[2] * lamda[2] + h_ratelo[2];
+
+      // Now calculate the atomic streaming velocity at the unwrapped coordinates
+      xbox = (image[i] & IMGMASK) - IMGMAX;
+      ybox = (image[i] >> IMGBITS & IMGMASK) - IMGMAX;
+      zbox = (image[i] >> IMG2BITS) - IMGMAX;
+      // TODO EVK: should be xbox + 1 if xbox < 0?
+      vstream_atom[0] = xbox*domain->h_rate[0] + ybox*domain->h_rate[5] + zbox*domain->h_rate[4];
+      vstream_atom[1] = ybox*domain->h_rate[1] + zbox*domain->h_rate[3];
+      vstream_atom[2] = zbox*domain->h_rate[2];
+
+      // Calculate the thermal velocity of the atom in its unwrapped position. Need to 
+      // add the new atomic streaming velocity, but subtract the COM streaming velocity
+      vthermal[i][0] = v[i][0] + vstream_atom[0] - vstream_chunk[0];
+      vthermal[i][1] = v[i][1] + vstream_atom[1] - vstream_chunk[1];
+      vthermal[i][2] = v[i][2] + vstream_atom[2] - vstream_chunk[2];
+    }
   }
+  // Calculate the thermal velocity (total minus streaming) of all chunks
+  vcm_thermal_compute();
+
+  // Tally up the chunk COM velocities to get the kinetic temperature
+  for (i = 0; i < nchunk; i++) {
+    t += (vcmall[i][0]*vcmall[i][0] + vcmall[i][1]*vcmall[i][1] + vcmall[i][2]*vcmall[i][2]) * 
+          masstotal[i];
+  } 
 
   // final temperature
-
   //MPI_Allreduce(&t,&scalar,1,MPI_DOUBLE,MPI_SUM,world);
   //double rcount = mycount;
   //double allcount;
   //MPI_Allreduce(&rcount,&allcount,1,MPI_DOUBLE,MPI_SUM,world);
   //printf("proc %d: nchunk = %d, allcount = %d\n", comm->me, nchunk, allcount);
 
-  //double dof = nchunk*cdof + adof*allcount;
   dof_compute();
   if (dof < 0.0)
     error->all(FLERR,"Temperature compute degrees of freedom < 0");
@@ -256,16 +280,16 @@ void ComputeTempDeformChunk::compute_vector()
   // calculate COM position and velocity for each chunk
   // This will be used to calculate the streaming velocity at the chunk's COM
   // TODO EVK: Need to find a sensible caching strategy - too slow to recalculate every time
-  com_vcm_compute();
+  if(comstep != update->ntimestep) {
+    com_compute();
+  }
 
   // lamda = COM position in triclinic lamda coords
   // vstream = COM streaming velocity = Hrate*lamda + Hratelo. Will be the same for each atom in the chunk
-  // vthermal = thermal velocity = v - vstream
-  double lamda[3], vstream[3], vthermal[3];
+  double lamda[3], vstream_chunk[3], vstream_atom[3];
 
   double *h_rate = domain->h_rate;
   double *h_ratelo = domain->h_ratelo;
-  // calculate KE tensor, optionally removing COM velocity
 
   double **v = atom->v;
   double *mass = atom->mass;
@@ -273,31 +297,58 @@ void ComputeTempDeformChunk::compute_vector()
   int *type = atom->type;
   int *mask = atom->mask;
   int nlocal = atom->nlocal;
+  int index;
+
+  int xbox, ybox, zbox;
+  imageint *image = atom->image;
 
   double massone,t[6];
   for (i = 0; i < 6; i++) t[i] = 0.0;
 
- 
-  for (i = 0; i < nchunk; i++) {
-      // Calculate streaming velocity at the chunk's centre of mass and apply to all atoms in the chunk
-      domain->x2lamda(comall[i], lamda);
-      vstream[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
-      vstream[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
-      vstream[2] = h_rate[2] * lamda[2] + h_ratelo[2];
+  // calculate KE tensor, removing COM streaming velocity
+  for (i = 0; i < nmax; i++) {
+    if (mask[i] & groupbit) {
+      index = ichunk[i]-1;
+      if (index < 0) continue;
 
-      vthermal[0] = vcmall[i][0] - vstream[0];
-      vthermal[1] = vcmall[i][1] - vstream[1];
-      vthermal[2] = vcmall[i][2] - vstream[2];
-      t[0] += masstotal[i] * vthermal[0] * vthermal[0];
-      t[1] += masstotal[i] * vthermal[1] * vthermal[1];
-      t[2] += masstotal[i] * vthermal[2] * vthermal[2];
-      t[3] += masstotal[i] * vthermal[0] * vthermal[1];
-      t[4] += masstotal[i] * vthermal[0] * vthermal[2];
-      t[5] += masstotal[i] * vthermal[1] * vthermal[2];
+      // Calculate streaming velocity at the chunk's centre of mass 
+      domain->x2lamda(comall[i], lamda);
+      vstream_chunk[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
+      vstream_chunk[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
+      vstream_chunk[2] = h_rate[2] * lamda[2] + h_ratelo[2];
+
+      // Now calculate the atomic streaming velocity at the unwrapped coordinates
+      xbox = (image[i] & IMGMASK) - IMGMAX;
+      ybox = (image[i] >> IMGBITS & IMGMASK) - IMGMAX;
+      zbox = (image[i] >> IMG2BITS) - IMGMAX;
+      // TODO EVK: should be xbox + 1 if xbox < 0?
+      vstream_atom[0] = xbox*domain->h_rate[0] + ybox*domain->h_rate[5] + zbox*domain->h_rate[4];
+      vstream_atom[1] = ybox*domain->h_rate[1] + zbox*domain->h_rate[3];
+      vstream_atom[2] = zbox*domain->h_rate[2];
+
+      // Calculate the thermal velocity of the atom in its unwrapped position. Need to 
+      // add the new atomic streaming velocity, but subtract the COM streaming velocity
+      vthermal[i][0] = v[i][0] + vstream_atom[0] - vstream_chunk[0];
+      vthermal[i][1] = v[i][1] + vstream_atom[1] - vstream_chunk[1];
+      vthermal[i][2] = v[i][2] + vstream_atom[2] - vstream_chunk[2];
     }
+  }
+  // Calculate the thermal velocity (total minus streaming) of all chunks
+  vcm_thermal_compute();
+
+  // Tally up the chunk COM velocities to get the kinetic temperature
+  // No need for MPI reductions, since every processor knows the chunk VCMs
+  for (i = 0; i < nchunk; i++) {
+      t[0] += masstotal[i] * vcmall[i][0] * vcmall[i][0];
+      t[1] += masstotal[i] * vcmall[i][1] * vcmall[i][1];
+      t[2] += masstotal[i] * vcmall[i][2] * vcmall[i][2];
+      t[3] += masstotal[i] * vcmall[i][0] * vcmall[i][1];
+      t[4] += masstotal[i] * vcmall[i][0] * vcmall[i][2];
+      t[5] += masstotal[i] * vcmall[i][1] * vcmall[i][2];
+  }
   // final KE
   //MPI_Allreduce(t,vector,6,MPI_DOUBLE,MPI_SUM,world);
-  for (i = 0; i < 6; i++) vector[i] *= force->mvv2e;
+  for (i = 0; i < 6; i++) vector[i] = t[i]*force->mvv2e;
 }
 
 
@@ -310,6 +361,9 @@ void ComputeTempDeformChunk::dof_compute()
   nchunk = cchunk->setup_chunks();
   adjust_dof_fix();
   dof = domain->dimension * nchunk;
+  // TODO EVK: This will vary on the type of constraint
+  // e.g. if they're bond constraints then they're irrelevant to
+  // the molecular temperature
   dof -= extra_dof + fix_dof;
   if (dof > 0)
     tfactor = force->mvv2e / (dof * force->boltz);
@@ -318,10 +372,82 @@ void ComputeTempDeformChunk::dof_compute()
 }
 
 /* ----------------------------------------------------------------------
-   calculate COM and VCM for each chunk
+   calculate COM for each chunk
 ------------------------------------------------------------------------- */
 
-void ComputeTempDeformChunk::com_vcm_compute()
+void ComputeTempDeformChunk::com_compute()
+{
+  int index;
+  double massone;
+  double unwrap[3];
+
+  comstep = update->ntimestep;
+
+  // compute chunk/atom assigns atoms to chunk IDs
+  // extract ichunk index vector from compute
+  // ichunk = 1 to Nchunk for included atoms, 0 for excluded atoms
+
+  nchunk = cchunk->setup_chunks();
+  cchunk->compute_ichunk();
+  int *ichunk = cchunk->ichunk;
+
+  if (nchunk > maxchunk) allocate();
+  size_array_rows = nchunk;
+
+  // zero local per-chunk values
+
+  for (int i = 0; i < nchunk; i++){
+    com[i][0] = com[i][1] = com[i][2] = 0.0;
+    massproc[i] = 0.0;
+  }
+
+  // compute COM and VCM for each chunk
+
+  double **x = atom->x;
+  double **v = atom->v;
+  int *mask = atom->mask;
+  int *type = atom->type;
+  imageint *image = atom->image;
+
+  double *mass = atom->mass;
+  double *rmass = atom->rmass;
+  int nlocal = atom->nlocal;
+
+  for (int i = 0; i < nlocal; i++)
+    if (mask[i] & groupbit) {
+      index = ichunk[i]-1;
+      if (index < 0) continue;
+      if (rmass) massone = rmass[i];
+      else massone = mass[type[i]];
+      
+      // Have to compute COM in unwrapped coordinates
+      domain->unmap(x[i],image[i],unwrap);
+      com[index][0] += unwrap[0] * massone;
+      com[index][1] += unwrap[1] * massone;
+      com[index][2] += unwrap[2] * massone;
+      massproc[index] += massone;
+    }
+
+  MPI_Allreduce(&com[0][0],&comall[0][0],3*nchunk,MPI_DOUBLE,MPI_SUM,world);
+  MPI_Allreduce(massproc,masstotal,nchunk,MPI_DOUBLE,MPI_SUM,world);
+
+  for (int i = 0; i < nchunk; i++) {
+    if (masstotal[i] > 0.0) {
+      comall[i][0] /= masstotal[i];
+      comall[i][1] /= masstotal[i];
+      comall[i][2] /= masstotal[i];
+    } else {
+      comall[i][0] = comall[i][1] = comall[i][2] = 0.0;
+    }
+  }
+}
+/* ----------------------------------------------------------------------
+   calculate thermal centre-of-mass velocity (lab-frame minus streaming) 
+   for each chunk.
+   PRE: com_compute() must have completed
+  --------------------------------------------------------------------*/
+
+void ComputeTempDeformChunk::vcm_thermal_compute()
 {
   int index;
   double massone;
@@ -341,9 +467,7 @@ void ComputeTempDeformChunk::com_vcm_compute()
   // zero local per-chunk values
 
   for (int i = 0; i < nchunk; i++){
-    com[i][0] = com[i][1] = com[i][2] = 0.0;
     vcm[i][0] = vcm[i][1] = vcm[i][2] = 0.0;
-    massproc[i] = 0.0;
   }
 
   // compute COM and VCM for each chunk
@@ -354,7 +478,6 @@ void ComputeTempDeformChunk::com_vcm_compute()
   int *type = atom->type;
 
   imageint *image = atom->image;
-  int xbox, ybox, zbox;
   double v_adjust[3];
 
   double *mass = atom->mass;
@@ -367,43 +490,21 @@ void ComputeTempDeformChunk::com_vcm_compute()
       if (index < 0) continue;
       if (rmass) massone = rmass[i];
       else massone = mass[type[i]];
-      
-      // Have to compute COM in unwrapped coordinates
-      domain->unmap(x[i],image[i],unwrap);
-      com[index][0] += unwrap[0] * massone;
-      com[index][1] += unwrap[1] * massone;
-      com[index][2] += unwrap[2] * massone;
-      // Now adjust the velocity to reflect the streaming velocity at the unwrapped coordinates
-      xbox = (image[i] & IMGMASK) - IMGMAX;
-      ybox = (image[i] >> IMGBITS & IMGMASK) - IMGMAX;
-      zbox = (image[i] >> IMG2BITS) - IMGMAX;
-      v_adjust[0] = xbox*domain->h_rate[0] + ybox*domain->h_rate[5] + zbox*domain->h_rate[4];
-      v_adjust[1] = ybox*domain->h_rate[1] + zbox*domain->h_rate[3];
-      v_adjust[2] = zbox*domain->h_rate[2];
-      //std::cout << "x: " << x[i][0] << " " << x[i][1] << " " << x[i][2] << " I: " << xbox << " " << ybox << " " << zbox << " v: " << v_adjust[0] << " " << v_adjust[1] << " " << v_adjust[2] << std::endl;
-      vcm[index][0] += (v[i][0] + v_adjust[0]) * massone;
-      vcm[index][1] += (v[i][1] + v_adjust[1]) * massone;
-      vcm[index][2] += (v[i][2] + v_adjust[2]) * massone;
-      massproc[index] += massone;
+      vcm[index][0] += vthermal[i][0] * massone;
+      vcm[index][1] += vthermal[i][1] * massone;
+      vcm[index][2] += vthermal[i][2] * massone;
     }
 
-  MPI_Allreduce(&com[0][0],&comall[0][0],3*nchunk,MPI_DOUBLE,MPI_SUM,world);
   MPI_Allreduce(&vcm[0][0],&vcmall[0][0],3*nchunk,MPI_DOUBLE,MPI_SUM,world);
-  MPI_Allreduce(massproc,masstotal,nchunk,MPI_DOUBLE,MPI_SUM,world);
-
   for (int i = 0; i < nchunk; i++) {
     if (masstotal[i] > 0.0) {
-      comall[i][0] /= masstotal[i];
-      comall[i][1] /= masstotal[i];
-      comall[i][2] /= masstotal[i];
       vcmall[i][0] /= masstotal[i];
       vcmall[i][1] /= masstotal[i];
       vcmall[i][2] /= masstotal[i];
     } else {
-      comall[i][0] = comall[i][1] = comall[i][2] = 0.0;
       vcmall[i][0] = vcmall[i][1] = vcmall[i][2] = 0.0;
     }
-  }
+  } 
 }
 
 /* ----------------------------------------------------------------------
@@ -416,21 +517,40 @@ void ComputeTempDeformChunk::com_vcm_compute()
 
 void ComputeTempDeformChunk::remove_bias(int i, double *v)
 {
-  double lamda[3];
+  double lamda[3], vstream_chunk[3], vstream_atom[3];
   double *h_rate = domain->h_rate;
   double *h_ratelo = domain->h_ratelo;
+  int xbox, ybox, zbox;
+  imageint *image = atom->image;
 
   int index = cchunk->ichunk[i]-1;
   if (index < 0) return;
 
-  domain->x2lamda(comall[index], lamda);
-  vbias[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
-  vbias[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
-  vbias[2] = h_rate[2] * lamda[2] + h_ratelo[2];
+  if(comstep != update->ntimestep) {
+    com_compute();
+  }
 
-  v[0] -= vbias[0];
-  v[1] -= vbias[1];
-  v[2] -= vbias[2];
+  domain->x2lamda(comall[index], lamda);
+  vstream_chunk[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
+  vstream_chunk[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
+  vstream_chunk[2] = h_rate[2] * lamda[2] + h_ratelo[2];
+
+  // Now calculate the atomic streaming velocity at the unwrapped coordinates
+  xbox = (image[i] & IMGMASK) - IMGMAX;
+  ybox = (image[i] >> IMGBITS & IMGMASK) - IMGMAX;
+  zbox = (image[i] >> IMG2BITS) - IMGMAX;
+  vstream_atom[0] = xbox*domain->h_rate[0] + ybox*domain->h_rate[5] + zbox*domain->h_rate[4];
+  vstream_atom[1] = ybox*domain->h_rate[1] + zbox*domain->h_rate[3];
+  vstream_atom[2] = zbox*domain->h_rate[2];
+
+  // Calculate the thermal velocity of the atom in its unwrapped position. Need to 
+  // add the new atomic streaming velocity, but subtract the COM streaming velocity
+  vbias[0] = vstream_chunk[0] - vstream_atom[0];
+  vbias[1] = vstream_chunk[1] - vstream_atom[1];
+  vbias[2] = vstream_chunk[2] - vstream_atom[2];
+  v[0] = v[0] - vbias[0];
+  v[1] = v[1] - vbias[1];
+  v[2] = v[2] - vbias[2];
 }
 
 /* ----------------------------------------------------------------------
@@ -439,9 +559,11 @@ void ComputeTempDeformChunk::remove_bias(int i, double *v)
 
 void ComputeTempDeformChunk::remove_bias_all()
 {
-  double lamda[3];
+  double lamda[3], vstream_chunk[3], vstream_atom[3];
   double *h_rate = domain->h_rate;
   double *h_ratelo = domain->h_ratelo;
+  int xbox, ybox, zbox;
+  imageint *image = atom->image;
 
   if (atom->nmax > maxbias) {
     memory->destroy(vbiasall);
@@ -456,15 +578,33 @@ void ComputeTempDeformChunk::remove_bias_all()
   int *mask = atom->mask;
   int nlocal = atom->nlocal;
 
+  if(comstep != update->ntimestep) {
+    com_compute();
+  }
+
   for (int i = 0; i < nlocal; i++)
     if (mask[i] & groupbit) {
       index = ichunk[i]-1;
       if (index < 0) continue;
- 
       domain->x2lamda(comall[index], lamda);
-      vbiasall[i][0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
-      vbiasall[i][1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
-      vbiasall[i][2] = h_rate[2] * lamda[2] + h_ratelo[2];
+      vstream_chunk[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
+      vstream_chunk[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
+      vstream_chunk[2] = h_rate[2] * lamda[2] + h_ratelo[2];
+
+      // Now calculate the atomic streaming velocity at the unwrapped coordinates
+      xbox = (image[i] & IMGMASK) - IMGMAX;
+      ybox = (image[i] >> IMGBITS & IMGMASK) - IMGMAX;
+      zbox = (image[i] >> IMG2BITS) - IMGMAX;
+      vstream_atom[0] = xbox*domain->h_rate[0] + ybox*domain->h_rate[5] + zbox*domain->h_rate[4];
+      vstream_atom[1] = ybox*domain->h_rate[1] + zbox*domain->h_rate[3];
+      vstream_atom[2] = zbox*domain->h_rate[2];
+
+      // Calculate the thermal velocity of the atom in its unwrapped position. Need to 
+      // add the new atomic streaming velocity, but subtract the COM streaming velocity
+      vbiasall[i][0] = vstream_chunk[0] - vstream_atom[0];
+      vbiasall[i][1] = vstream_chunk[1] - vstream_atom[1];
+      vbiasall[i][2] = vstream_chunk[2] - vstream_atom[2];
+    
       v[i][0] -= vbiasall[i][0];
       v[i][1] -= vbiasall[i][1];
       v[i][2] -= vbiasall[i][2];
@@ -581,12 +721,21 @@ void ComputeTempDeformChunk::unlock(Fix *fixptr)
 
 void ComputeTempDeformChunk::allocate()
 {
+  memory->destroy(vthermal);
   memory->destroy(sum);
   memory->destroy(sumall);
   memory->destroy(count);
   memory->destroy(countall);
   memory->destroy(array);
+  memory->destroy(vcm);
+  memory->destroy(vcmall);
+  memory->destroy(com);
+  memory->destroy(comall);
+  memory->destroy(massproc);
+  memory->destroy(masstotal);
   maxchunk = nchunk;
+  nmax = atom->nlocal;
+  memory->create(vthermal,nmax,3,"temp/deform/chunk:vcmall");
   memory->create(sum,maxchunk,"temp/deform/chunk:sum");
   memory->create(sumall,maxchunk,"temp/deform/chunk:sumall");
   memory->create(count,maxchunk,"temp/deform/chunk:count");
@@ -607,6 +756,7 @@ void ComputeTempDeformChunk::allocate()
 
 double ComputeTempDeformChunk::memory_usage()
 {
+  // TODO EVK: this is completely wrong
   double bytes = (bigint) maxchunk * 2 * sizeof(double);
   bytes += (double) maxchunk * 2 * sizeof(int);
   bytes += (double) maxchunk * nvalues * sizeof(double);
