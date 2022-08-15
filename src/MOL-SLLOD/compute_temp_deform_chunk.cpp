@@ -312,7 +312,7 @@ void ComputeTempDeformChunk::compute_vector()
       if (index < 0) continue;
 
       // Calculate streaming velocity at the chunk's centre of mass 
-      domain->x2lamda(comall[i], lamda);
+      domain->x2lamda(comall[index], lamda);
       vstream_chunk[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
       vstream_chunk[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
       vstream_chunk[2] = h_rate[2] * lamda[2] + h_ratelo[2];
