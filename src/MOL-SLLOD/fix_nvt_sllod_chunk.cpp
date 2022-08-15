@@ -50,6 +50,21 @@ FixNVTSllodChunk::FixNVTSllodChunk(LAMMPS *lmp, int narg, char **arg) :
 
   if (mtchain_default_flag) mtchain = 1;
 
+  kickflag = 0;
+
+  int iarg = 3;
+
+  while (iarg < narg) {
+    if (strcmp(arg[iarg++], "kick")==0) {
+      if (iarg >= narg) error->all(FLERR,"Invalid fix nvt/sllod/chunk command");
+      if (strcmp(arg[iarg], "yes")==0) {
+        kickflag = 1;
+      } else if (strcmp(arg[iarg], "no")==0) {
+        kickflag = 0;
+      } else error->all(FLERR,"Invalid fix nvt/sllod/chunk command");
+      ++iarg;
+    }
+  }
 
   // create a new compute temp style
   // id = fix-ID + temp
@@ -118,6 +133,24 @@ void FixNVTSllodChunk::init() {
   cvcm = dynamic_cast<ComputeVCMChunk *>( modify->compute[icompute]);
   if (strcmp(cvcm->style,"vcm/chunk") != 0)
     error->all(FLERR," does not use vcm/chunk compute");
+
+}
+
+void FixNVTSllodChunk::setup(int vflag) {
+  FixNH::setup(vflag);
+
+  // Apply kick if necessary
+  if (kickflag) {
+    // Call remove_bias first to calculate biases
+    temperature->remove_bias_all();
+
+    // Restore twice to apply streaming profile
+    temperature->restore_bias_all();
+    temperature->restore_bias_all();
+
+    // Don't kick again if multi-step run
+    kickflag = 0;
+  }
 
 }
 
