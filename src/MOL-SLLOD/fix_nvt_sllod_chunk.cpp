@@ -82,7 +82,7 @@ void FixNVTSllodChunk::init() {
     error->all(FLERR,"Temperature for fix nvt/sllod/chunk does not have a bias");
 
   nondeformbias = 0;
-  if (strcmp(temperature->style,"temp/deform") != 0) nondeformbias = 1;
+  if (strcmp(temperature->style,"temp/deform/chunk") != 0) nondeformbias = 1;
 
   // check fix deform remap settings
 

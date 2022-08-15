@@ -166,6 +166,7 @@ void ComputeTempDeformChunk::init()
 double ComputeTempDeformChunk::compute_scalar()
 {
   int i;
+  invoked_scalar = update->ntimestep;
 
   // calculate chunk assignments,
   //   since only atoms in chunks contribute to global temperature
@@ -264,6 +265,8 @@ double ComputeTempDeformChunk::compute_scalar()
 void ComputeTempDeformChunk::compute_vector()
 {
   int i;
+
+  invoked_vector = update->ntimestep;
 
   // calculate chunk assignments,
   //   since only atoms in chunks contribute to global temperature
