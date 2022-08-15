@@ -142,6 +142,7 @@ void FixNVTSllodChunk::setup(int vflag) {
   // Apply kick if necessary
   if (kickflag) {
     // Call remove_bias first to calculate biases
+    temperature->compute_scalar();
     temperature->remove_bias_all();
 
     // Restore twice to apply streaming profile

@@ -530,8 +530,6 @@ void ComputeTempDeformChunk::remove_bias(int i, double *v)
   int index = cchunk->ichunk[i]-1;
   if (index < 0) return;
 
-  com_compute();
-
   domain->x2lamda(comall[index], lamda);
   vstream_chunk[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
   vstream_chunk[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
@@ -579,8 +577,6 @@ void ComputeTempDeformChunk::remove_bias_all()
   double **v = atom->v;
   int *mask = atom->mask;
   int nlocal = atom->nlocal;
-
-  com_compute();
 
   for (int i = 0; i < nlocal; i++)
     if (mask[i] & groupbit) {
