@@ -13,7 +13,7 @@
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
-   Contributing author: Emily Kahl (Uni of QLD)
+   Contributing author: Emily Kahl, Stephen Sanderson, Shern Tee (Uni of QLD)
 ------------------------------------------------------------------------- */
 
 #include "compute_temp_deform_chunk.h"
@@ -74,30 +74,6 @@ ComputeTempDeformChunk::ComputeTempDeformChunk(LAMMPS *lmp, int narg, char **arg
   biasflag = 0;
   adof = domain->dimension;
   cdof = 0.0;
-
-  /*
-  while (iarg < narg) {
-    if (strcmp(arg[iarg],"com") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal compute temp/chunk/deform command");
-      comflag = utils::logical(FLERR,arg[iarg+1],false,lmp);
-      iarg += 2;
-    } else if (strcmp(arg[iarg],"bias") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal compute temp/chunk/deform command");
-      biasflag = 1;
-      id_bias = utils::strdup(arg[iarg+1]);
-      iarg += 2;
-    } else if (strcmp(arg[iarg],"adof") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal compute temp/chunk/deform command");
-      adof = utils::numeric(FLERR,arg[iarg+1],false,lmp);
-      iarg += 2;
-    } else if (strcmp(arg[iarg],"cdof") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal compute temp/chunk/deform command");
-      cdof = utils::numeric(FLERR,arg[iarg+1],false,lmp);
-      iarg += 2;
-    } else error->all(FLERR,"Illegal compute temp/chunk/deform command");
-  }
-  */
-
   // vector data
 
   vector = new double[size_vector];
@@ -183,10 +159,7 @@ double ComputeTempDeformChunk::compute_scalar()
 
   // calculate COM position for each chunk
   // This will be used to calculate the streaming velocity at the chunk's COM
-  // TODO EVK: Need to find a sensible caching strategy - too slow to recalculate every time
-  if(comstep != update->ntimestep) {
-    com_compute();
-  }
+  com_compute();
  
   // lamda = COM position in triclinic lamda coords
   // vstream = COM streaming velocity = Hrate*lamda + Hratelo. Will be the same for each atom in the chunk
@@ -226,7 +199,6 @@ double ComputeTempDeformChunk::compute_scalar()
       xbox = (image[i] & IMGMASK) - IMGMAX;
       ybox = (image[i] >> IMGBITS & IMGMASK) - IMGMAX;
       zbox = (image[i] >> IMG2BITS) - IMGMAX;
-      // TODO EVK: should be xbox + 1 if xbox < 0?
       vstream_atom[0] = xbox*domain->h_rate[0] + ybox*domain->h_rate[5] + zbox*domain->h_rate[4];
       vstream_atom[1] = ybox*domain->h_rate[1] + zbox*domain->h_rate[3];
       vstream_atom[2] = zbox*domain->h_rate[2];
@@ -248,12 +220,6 @@ double ComputeTempDeformChunk::compute_scalar()
   } 
 
   // final temperature
-  //MPI_Allreduce(&t,&scalar,1,MPI_DOUBLE,MPI_SUM,world);
-  //double rcount = mycount;
-  //double allcount;
-  //MPI_Allreduce(&rcount,&allcount,1,MPI_DOUBLE,MPI_SUM,world);
-  //printf("proc %d: nchunk = %d, allcount = %d\n", comm->me, nchunk, allcount);
-
   dof_compute();
   if (dof < 0.0)
     error->all(FLERR,"Temperature compute degrees of freedom < 0");
@@ -283,10 +249,7 @@ void ComputeTempDeformChunk::compute_vector()
 
   // calculate COM position and velocity for each chunk
   // This will be used to calculate the streaming velocity at the chunk's COM
-  // TODO EVK: Need to find a sensible caching strategy - too slow to recalculate every time
-  if(comstep != update->ntimestep) {
-    com_compute();
-  }
+  com_compute();
 
   // lamda = COM position in triclinic lamda coords
   // vstream = COM streaming velocity = Hrate*lamda + Hratelo. Will be the same for each atom in the chunk
@@ -325,7 +288,6 @@ void ComputeTempDeformChunk::compute_vector()
       xbox = (image[i] & IMGMASK) - IMGMAX;
       ybox = (image[i] >> IMGBITS & IMGMASK) - IMGMAX;
       zbox = (image[i] >> IMG2BITS) - IMGMAX;
-      // TODO EVK: should be xbox + 1 if xbox < 0?
       vstream_atom[0] = xbox*domain->h_rate[0] + ybox*domain->h_rate[5] + zbox*domain->h_rate[4];
       vstream_atom[1] = ybox*domain->h_rate[1] + zbox*domain->h_rate[3];
       vstream_atom[2] = zbox*domain->h_rate[2];
@@ -351,7 +313,6 @@ void ComputeTempDeformChunk::compute_vector()
       t[5] += masstotal[i] * vcmall[i][1] * vcmall[i][2];
   }
   // final KE
-  //MPI_Allreduce(t,vector,6,MPI_DOUBLE,MPI_SUM,world);
   for (i = 0; i < 6; i++) vector[i] = t[i]*force->mvv2e;
 }
 
@@ -365,7 +326,7 @@ void ComputeTempDeformChunk::dof_compute()
   nchunk = cchunk->setup_chunks();
   adjust_dof_fix();
   dof = domain->dimension * nchunk;
-  // TODO EVK: This will vary on the type of constraint
+  // This will vary on the type of constraint
   // e.g. if they're bond constraints then they're irrelevant to
   // the molecular temperature
   dof -= extra_dof + fix_dof;
@@ -752,13 +713,8 @@ void ComputeTempDeformChunk::allocate()
 
 double ComputeTempDeformChunk::memory_usage()
 {
-  // TODO EVK: this is completely wrong
-  double bytes = (bigint) maxchunk * 2 * sizeof(double);
-  bytes += (double) maxchunk * 2 * sizeof(int);
-  bytes += (double) maxchunk * nvalues * sizeof(double);
-  if (comflag || nvalues) {
-    bytes += (double) maxchunk * 2 * sizeof(double);
-    bytes += (double) maxchunk * 2*3 * sizeof(double);
-  }
+  double bytes = (bigint) maxchunk * 3 * sizeof(double);
+  bytes *= 12;
+  
   return bytes;
 }
