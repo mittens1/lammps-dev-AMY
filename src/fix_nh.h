@@ -24,7 +24,7 @@ class FixNH : public Fix {
   ~FixNH() override;
   int setmask() override;
   void init() override;
-  void setup(int) override;
+  virtual void setup(int) override;
   void initial_integrate(int) override;
   void final_integrate() override;
   void initial_integrate_respa(int, int, int) override;

@@ -363,6 +363,10 @@ FixNH::FixNH(LAMMPS *lmp, int narg, char **arg) :
       idchunk = utils::strdup(arg[iarg+1]);
       idvcm = utils::strdup(arg[iarg+2]);
       iarg += 3;
+
+    // keyword kick parsed in fix nvt/sllod
+    } else if (strcmp(arg[iarg], "kick") == 0) {
+      iarg += 2;
     } else error->all(FLERR,"Illegal fix nvt/npt/nph command");
   }
 

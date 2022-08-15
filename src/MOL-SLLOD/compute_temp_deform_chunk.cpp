@@ -50,6 +50,7 @@ ComputeTempDeformChunk::ComputeTempDeformChunk(LAMMPS *lmp, int narg, char **arg
   extvector = 1;
   tempflag = 1;
   tempbias = 1;
+  maxbias = 0;
   vbiasall = nullptr;
   vthermal = nullptr;
 
