@@ -97,7 +97,7 @@ void FixNVTSllodChunk::init() {
     error->all(FLERR,"Temperature for fix nvt/sllod/chunk does not have a bias");
 
   nondeformbias = 0;
-  if (strcmp(temperature->style,"temp/deform") != 0) nondeformbias = 1;
+  if (strcmp(temperature->style,"temp/deform/chunk") != 0) nondeformbias = 1;
 
   // check fix deform remap settings
 
@@ -142,6 +142,7 @@ void FixNVTSllodChunk::setup(int vflag) {
   // Apply kick if necessary
   if (kickflag) {
     // Call remove_bias first to calculate biases
+    temperature->compute_scalar();
     temperature->remove_bias_all();
 
     // Restore twice to apply streaming profile
@@ -167,6 +168,9 @@ void FixNVTSllodChunk::nh_v_temp() {
   //   computed on current nlocal atoms to remove bias
 
   if (nondeformbias) temperature->compute_scalar();
+
+  // Remove bias from all atoms at once to avoid re-calculating the COM positions
+  temperature->remove_bias_all();
 
   // Use molecular/chunk centre-of-mass velocity when calculating SLLOD correction
   vcm_thermal_compute();
@@ -196,15 +200,18 @@ void FixNVTSllodChunk::nh_v_temp() {
       vdelu[0] = h_two[0]*vcmall[index][0] + h_two[5]*vcmall[index][1] + h_two[4]*vcmall[index][2];
       vdelu[1] = h_two[1]*vcmall[index][1] + h_two[3]*vcmall[index][2];
       vdelu[2] = h_two[2]*vcmall[index][2];
-      temperature->remove_bias(i,v[i]);
       v[i][0] = v[i][0] - vcmall[index][0] + vcmall[index][0]*factor_eta - dthalf*vdelu[0];
       v[i][1] = v[i][1] - vcmall[index][1] + vcmall[index][1]*factor_eta - dthalf*vdelu[1];
       v[i][2] = v[i][2] - vcmall[index][2] + vcmall[index][2]*factor_eta - dthalf*vdelu[2];
-      temperature->restore_bias(i,v[i]);
     }
   }
+  temperature->restore_bias_all();
 }
 
+/* calculate COM thermal velocity. 
+ * Pre: atom velocities should have streaming bias removed
+ *      COM positions should already be computed when removing biases
+ */
 void FixNVTSllodChunk::vcm_thermal_compute() {
   int index;
   double massone;
@@ -259,15 +266,12 @@ void FixNVTSllodChunk::vcm_thermal_compute() {
         massone = mass[type[i]];
       }
       // Adjust the velocity to reflect the thermal velocity 
-      temperature->remove_bias(i, v[i]);
       vcm[index][0] += v[i][0] * massone;
       vcm[index][1] += v[i][1] * massone;
       vcm[index][2] += v[i][2] * massone;
       massproc[index] += massone;
-      temperature->restore_bias(i, v[i]);
     }
 
-  // TODO EVK: This should probably be cached/re-used between styles (e.g. thermostat)
   MPI_Allreduce(&vcm[0][0],&vcmall[0][0],3*nchunk,MPI_DOUBLE,MPI_SUM,world);
   MPI_Allreduce(massproc,masstotal,nchunk,MPI_DOUBLE,MPI_SUM,world);
 
