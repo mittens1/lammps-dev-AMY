@@ -197,9 +197,9 @@ void FixNVTSllodChunk::nh_v_temp() {
       vdelu[1] = h_two[1]*vcmall[index][1] + h_two[3]*vcmall[index][2];
       vdelu[2] = h_two[2]*vcmall[index][2];
       temperature->remove_bias(i,v[i]);
-      v[i][0] = vcmall[index][0]*factor_eta - dthalf*vdelu[0];
-      v[i][1] = vcmall[index][1]*factor_eta - dthalf*vdelu[1];
-      v[i][2] = vcmall[index][2]*factor_eta - dthalf*vdelu[2];
+      v[i][0] = v[i][0] - vcmall[index][0] + vcmall[index][0]*factor_eta - dthalf*vdelu[0];
+      v[i][1] = v[i][1] - vcmall[index][1] + vcmall[index][1]*factor_eta - dthalf*vdelu[1];
+      v[i][2] = v[i][2] - vcmall[index][2] + vcmall[index][2]*factor_eta - dthalf*vdelu[2];
       temperature->restore_bias(i,v[i]);
     }
   }
