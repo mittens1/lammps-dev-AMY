@@ -30,10 +30,12 @@ class FixNVTSllodChunk : public FixNH {
   ~FixNVTSllodChunk();
 
   void init() override;
+  void setup(int) override;
 
  private:
   int nondeformbias;
   int nchunk, maxchunk;
+  int kickflag;           // Whether to apply the streaming profile on init
   double **vcm, **vcmall;
   double *massproc, *masstotal;
 
