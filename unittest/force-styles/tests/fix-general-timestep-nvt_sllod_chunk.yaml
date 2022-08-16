@@ -1,7 +1,7 @@
 ---
 lammps_version: 23 Jun 2022
 tags: generated
-date_generated: Tue Aug 16 10:25:29 2022
+date_generated: Tue Aug 16 11:22:32 2022
 epsilon: 2e-12
 skip_tests:
 prerequisites: ! |
@@ -9,11 +9,11 @@ prerequisites: ! |
   fix nvt/sllod/chunk
   pair lj/cut/chunk
 pre_commands: ! ""
-post_commands: ! "fix def all deform 1 xy erate 1.0 remap v\ncompute molchunk all
-  chunk/atom molecule \ncompute molcom all com/chunk molchunk\ncompute molvel all
-  vcm/chunk molchunk\ncompute moltemp all temp/chunk molchunk\ncompute shear_temp
-  all temp/deform/chunk molchunk \nfix test all nvt/sllod/chunk temp 1.0 1.0 $(50.0*dt)
-  tchain 1 chunk molchunk molvel kick no\nfix_modify test temp shear_temp\n"
+post_commands: ! "neigh_modify delay 4\nfix def all deform 1 xy erate 1.0 remap v\ncompute
+  molchunk all chunk/atom molecule \ncompute molcom all com/chunk molchunk\ncompute
+  molvel all vcm/chunk molchunk\ncompute moltemp all temp/chunk molchunk\ncompute
+  shear_temp all temp/deform/chunk molchunk \nfix test all nvt/sllod/chunk temp 1.0
+  1.0 $(50.0*dt) tchain 1 chunk molchunk molvel kick no\nfix_modify test temp shear_temp\n"
 input_file: in.sllod-chunk
 natoms: 1792
 global_scalar: 1101.3362342114021
