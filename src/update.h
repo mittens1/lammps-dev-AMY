@@ -40,6 +40,7 @@ class Update : protected Pointers {
 
   bigint eflag_global, eflag_atom;    // timestep global/peratom eng is tallied on
   bigint vflag_global, vflag_atom;    // ditto for virial
+  bigint vflag_mol;                   // timestep molecular virial is tallied on
 
   char *unit_style;
 
