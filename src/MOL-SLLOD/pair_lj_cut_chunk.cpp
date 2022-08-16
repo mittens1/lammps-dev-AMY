@@ -39,12 +39,13 @@ using namespace MathConst;
 
 /* ---------------------------------------------------------------------- */
 
-PairLJCutChunk::PairLJCutChunk(LAMMPS *lmp) : Pair(lmp)
+PairLJCutChunk::PairLJCutChunk(LAMMPS *lmp) : Pair(lmp), chunk_ID(nullptr)
 {
   respa_enable = 1;
   born_matrix_enable = 1;
   writedata = 1;
   comm_forward = 1;
+  nmax = 0;
 }
 
 /* ---------------------------------------------------------------------- */

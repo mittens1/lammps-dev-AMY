@@ -34,7 +34,7 @@ using namespace MathConst;
 
 /* ---------------------------------------------------------------------- */
 
-PairLJCutCoulCutChunk::PairLJCutCoulCutChunk(LAMMPS *lmp) : Pair(lmp)
+PairLJCutCoulCutChunk::PairLJCutCoulCutChunk(LAMMPS *lmp) : Pair(lmp), chunk_ID(nullptr)
 {
   writedata = 1;
   nmax = 0;
