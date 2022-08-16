@@ -214,6 +214,32 @@ endif()
   set_tests_properties(${TNAME} PROPERTIES LABELS "${TEST_TAGS}")
 endforeach()
 
+# generalized tester for timestepping fixes
+add_executable(test_fix_general_timestep test_fix_general_timestep.cpp)
+if(NOT BUILD_SHARED_LIBS)
+  target_compile_definitions(test_fix_general_timestep PRIVATE USING_STATIC_LIBS=1)
+endif()
+target_link_libraries(test_fix_general_timestep PRIVATE lammps style_tests)
+
+# tests for timestep related fixes (time integration, thermostat, force manipulation, constraints/restraints)
+file(GLOB FIX_GENERAL_TIMESTEP_TESTS LIST_DIRECTORIES false
+${TEST_INPUT_FOLDER}/fix-general-timestep-*.yaml)
+foreach(TEST ${FIX_GENERAL_TIMESTEP_TESTS})
+  string(REGEX REPLACE "^.*fix-general-timestep-(.*)\.yaml" "FixGeneralTimestep:\\1" TNAME ${TEST})
+  extract_tags(TEST_TAGS ${TEST})
+  list(FIND TEST_TAGS "no${CMAKE_SYSTEM_NAME}" _SKIPME)
+  if(_SKIPME GREATER_EQUAL 0)
+    continue()
+  endif()
+  add_test(NAME ${TNAME} COMMAND test_fix_general_timestep ${TEST})
+if(WIN32)
+  set_tests_properties(${TNAME} PROPERTIES ENVIRONMENT "LAMMPS_POTENTIALS=${LAMMPS_POTENTIALS_DIR};PYTHONPATH=${TEST_INPUT_FOLDER}\\\;${LAMMPS_PYTHON_DIR}")
+else()
+  set_tests_properties(${TNAME} PROPERTIES ENVIRONMENT "LAMMPS_POTENTIALS=${LAMMPS_POTENTIALS_DIR};PYTHONPATH=${TEST_INPUT_FOLDER}:${LAMMPS_PYTHON_DIR}:$ENV{PYTHONPATH}")
+endif()
+  set_tests_properties(${TNAME} PROPERTIES LABELS "${TEST_TAGS}")
+endforeach()
+
 # dihedral style tester
 add_executable(test_dihedral_style test_dihedral_style.cpp)
 target_link_libraries(test_dihedral_style PRIVATE lammps style_tests)
