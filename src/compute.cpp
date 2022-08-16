@@ -66,7 +66,7 @@ Compute::Compute(LAMMPS *lmp, int narg, char **arg) :
   size_vector_variable = size_array_rows_variable = 0;
 
   tempflag = pressflag = peflag = 0;
-  pressatomflag = peatomflag = 0;
+  pressatomflag = peatomflag = vmolflag = 0;
   create_attribute = 0;
   tempbias = 0;
 

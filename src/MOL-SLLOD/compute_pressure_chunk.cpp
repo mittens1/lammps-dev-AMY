@@ -50,6 +50,7 @@ ComputePressureChunk::ComputePressureChunk(LAMMPS *lmp, int narg, char **arg) :
   extvector = 0;
   pressflag = 1;
   timeflag = 1;
+  vmolflag = 1;
 
   // store temperature ID used by pressure computation
   // insure it is valid for temperature computation

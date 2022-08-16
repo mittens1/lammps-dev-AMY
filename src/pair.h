@@ -295,8 +295,11 @@ class Pair : protected Pointers {
 /**************** EVK DEBUG *********************/
  public:
   double chunk_virial[9];             // Accumulated molecular virial
-  int vflag_chunk;
+  int vflag_mol;
 
+  void vmol_tally(int, int, int, int, double, double, double, double);
+  void vmol_tally_xyz(int, int, int, int, double, double, double);
+  double ** mols_com; // point this to FPM->mols_com
 };
 
 }    // namespace LAMMPS_NS

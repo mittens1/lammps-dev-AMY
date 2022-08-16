@@ -73,6 +73,7 @@ class Compute : protected Pointers {
   int pressatomflag;       // 1 if Compute calculates per-atom virial
                            // 2 if Compute calculates per-atom centroid virial
                            // 3 if Compute calculates both
+  int vmolflag;            // 1 if Compute calculates global molecular virial
   int peflag;              // 1 if Compute calculates PE (uses Force energies)
   int peatomflag;          // 1 if Compute calculates per-atom PE
   int create_attribute;    // 1 if compute stores attributes that need

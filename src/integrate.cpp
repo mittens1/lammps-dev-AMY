@@ -30,7 +30,7 @@ using namespace LAMMPS_NS;
 Integrate::Integrate(LAMMPS *lmp, int /*narg*/, char ** /*arg*/) : Pointers(lmp)
 {
   elist_global = elist_atom = nullptr;
-  vlist_global = vlist_atom = cvlist_atom = nullptr;
+  vlist_global = vlist_atom = cvlist_atom = vlist_mol = nullptr;
   external_force_clear = 0;
 }
 
@@ -90,7 +90,7 @@ void Integrate::ev_setup()
     if (modify->compute[i]->pressflag) nvlist_global++;
     if (modify->compute[i]->pressatomflag & 1) nvlist_atom++;
     if (modify->compute[i]->pressatomflag & 2) ncvlist_atom++;
-    if (modify->compute[i]->pressatomflag & 4) nvlist_mol++;
+    if (modify->compute[i]->vmolflag) nvlist_mol++;
   }
 
   if (nelist_global) elist_global = new Compute*[nelist_global];
@@ -113,7 +113,7 @@ void Integrate::ev_setup()
       vlist_atom[nvlist_atom++] = modify->compute[i];
     if (modify->compute[i]->pressatomflag & 2)
       cvlist_atom[ncvlist_atom++] = modify->compute[i];
-    if (modify->compute[i]->pressatomflag & 4)
+    if (modify->compute[i]->vmolflag)
       vlist_mol[nvlist_mol++] = modify->compute[i];
   }
 }
