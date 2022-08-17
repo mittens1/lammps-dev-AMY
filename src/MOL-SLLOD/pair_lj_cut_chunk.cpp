@@ -74,6 +74,9 @@ PairLJCutChunk::~PairLJCutChunk()
 
 void PairLJCutChunk::compute(int eflag, int vflag)
 {
+  for (int d = 0; d < 9; d++) chunk_virial[d] = 0.;    
+    // hackish reset of chunk_virial
+  
   int i, j, ii, jj, inum, jnum, itype, jtype;
   double xtmp, ytmp, ztmp, delx, dely, delz, evdwl, fpair;
   double rsq, r2inv, r6inv, forcelj, factor_lj;

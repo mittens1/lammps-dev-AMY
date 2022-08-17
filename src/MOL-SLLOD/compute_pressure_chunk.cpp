@@ -133,7 +133,9 @@ ComputePressureChunk::ComputePressureChunk(LAMMPS *lmp, int narg, char **arg) :
         pairflag = 1;
         bondflag = angleflag = dihedralflag = improperflag = 1;
         kspaceflag = fixflag = 1;
-      } else error->all(FLERR,"Illegal compute pressure command");
+      } 
+      else if (strcmp(arg[iarg],"novmolflag") == 0) vmolflag = 0;
+      else error->all(FLERR,"Illegal compute pressure command");
       iarg++;
     }
   }

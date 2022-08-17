@@ -27,7 +27,7 @@ namespace LAMMPS_NS {
 class ComputePressureChunk : public Compute {
  public:
   ComputePressureChunk(class LAMMPS *, int, char **);
-  ~ComputePressureChunk() override;
+  virtual ~ComputePressureChunk() override;
   void init() override;
   double compute_scalar() override;
   void compute_vector() override;

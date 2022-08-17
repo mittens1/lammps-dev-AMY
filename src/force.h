@@ -35,7 +35,7 @@ enum {
   VIRIAL_FDOTR    = 0x02,
   VIRIAL_ATOM     = 0x04,
   VIRIAL_CENTROID = 0x08,
-  VIRIAL_MOL      = 0x16
+  VIRIAL_MOL      = 0x10
 };
 // clang-format on
 

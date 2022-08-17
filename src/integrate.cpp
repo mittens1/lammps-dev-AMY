@@ -101,7 +101,7 @@ void Integrate::ev_setup()
   if (nvlist_mol) vlist_mol = new Compute*[nvlist_mol];
 
   nelist_global = nelist_atom = 0;
-  nvlist_global = nvlist_atom = ncvlist_atom = 0;
+  nvlist_global = nvlist_atom = ncvlist_atom = nvlist_mol = 0;
   for (int i = 0; i < modify->ncompute; i++) {
     if (modify->compute[i]->peflag)
       elist_global[nelist_global++] = modify->compute[i];
@@ -190,5 +190,6 @@ void Integrate::ev_set(bigint ntimestep)
   
   if (vflag_global) update->vflag_global = ntimestep;
   if (vflag_atom || cvflag_atom) update->vflag_atom = ntimestep;
+  if (vflag_mol) update->vflag_mol = ntimestep;
   vflag = vflag_global + vflag_atom + cvflag_atom + vflag_mol;
 }

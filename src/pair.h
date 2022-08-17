@@ -300,6 +300,14 @@ class Pair : protected Pointers {
   void vmol_tally(int, int, int, int, double, double, double, double);
   void vmol_tally_xyz(int, int, int, int, double, double, double);
   double ** mols_com; // point this to FPM->mols_com
+
+ private:
+  // update_mols_com-specific
+  void update_mols_com();
+  tagint maxall;
+  bool *mol_is_local, *mol_is_ghost, *mol_is_requested;
+  int *buff_mols, *gather_mols;
+  double *buff_mol_coms, *gather_mol_coms;
 };
 
 }    // namespace LAMMPS_NS
