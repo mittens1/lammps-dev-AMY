@@ -2411,7 +2411,7 @@ void Pair::update_mols_com()
   int* displs = new int[nprocs];
   int* all_nbuff = new int[nprocs];
 
-  MPI_Allgather(&nbuff, 1, MPI_INT, all_nbuff, nprocs, MPI_INT, world);
+  MPI_Allgather(&nbuff, 1, MPI_INT, all_nbuff, 1, MPI_INT, world);
 
   displs[0] = 0;
   for (int n = 1; n < nprocs; n++) displs[n] = displs[n-1] + all_nbuff[n-1];
@@ -2468,7 +2468,7 @@ void Pair::update_mols_com()
   // they own local atoms and other procs requested information
   // and then send the actual molcom information
 
-  MPI_Allgather(&nbuff, 1, MPI_INT, all_nbuff, nprocs, MPI_INT, world);
+  MPI_Allgather(&nbuff, 1, MPI_INT, all_nbuff, 1, MPI_INT, world);
 
   displs[0] = 0;
   for (int n = 1; n < nprocs; n++) displs[n] = displs[n-1] + all_nbuff[n-1];
@@ -2488,7 +2488,7 @@ void Pair::update_mols_com()
     displs4[n] = displs[n] * 4;
   }
 
-  MPI_Allgatherv(buff_mol_coms, nbuff*4, MPI_INT, gather_mol_coms, all_nbuff4, displs4, MPI_INT, world);
+  MPI_Allgatherv(buff_mol_coms, nbuff*4, MPI_DOUBLE, gather_mol_coms, all_nbuff4, displs4, MPI_DOUBLE, world);
 
   // add gather_mol_coms information to my information
 
