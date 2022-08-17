@@ -2378,17 +2378,46 @@ void Pair::update_mols_com()
     memory->create(gather_mol_coms, maxall_int*nprocs*4, "pair:gather_mol_coms");
   }
 
-  // get list of local and ghost molecules
-  // as well as number of local and ghost molecules
+  // calculate local COMs -- normalize with mass at end
+  // after including ghost contribs
+
+  memset(&mols_com[0][0], 0, 4*static_cast<int>(maxall)*sizeof(double));
+
+  double **x = atom->x;
+  int *mask = atom->mask;
+  int *type = atom->type;
+  imageint *image = atom->image;
+  double *mass = atom->mass;
+  double *rmass = atom->rmass;
+  double unwrap[3];
 
   memset(mol_is_local, false, sizeof(bool) * static_cast<int>(maxall));
-  memset(mol_is_ghost, false, sizeof(bool) * static_cast<int>(maxall));
-
+  
   for (int i = 0; i < nlocal; i++) {
     int imol = static_cast<int>(molecule[i]);
     if (imol <= 0) continue;
-    mol_is_local[imol] = true;
+      double massone = (rmass)? rmass[i] : mass[type[i]];
+      domain->unmap(x[i],image[i],unwrap);
+      mols_com[imol][0] += unwrap[0] * massone;
+      mols_com[imol][1] += unwrap[1] * massone;
+      mols_com[imol][2] += unwrap[2] * massone;
+      mols_com[imol][3] += massone;
+      mol_is_local[imol] = true;
   }
+
+  // START Rendezvous Block
+  //
+  // The Rendezvous Block should be replaceable with
+  // MPI_Allreduce(&mols_com[0][0], static_cast<int>(maxall)*4, MPI_DOUBLE,
+  // MPI_SUM, world);
+  // This Rendezvous routine in theory avoids sending lots of 0.0s into the
+  // Allreduce -- in practice, it is worth optimizing and possibly even making a
+  // code branch which we can turn on or off.
+
+  // get list of local and ghost molecules
+  // as well as number of local and ghost molecules
+
+  memset(mol_is_ghost, false, sizeof(bool) * static_cast<int>(maxall));
 
   for (int i = nlocal; i < nall; i++) {
     int imol = static_cast<int>(molecule[i]);
@@ -2420,30 +2449,6 @@ void Pair::update_mols_com()
 
   // now gather_mols holds all molecule numbers requested by all procs
   // (including me!!)
-
-  // calculate local COMs -- normalize with mass at end
-  // after including ghost contribs
-
-  memset(&mols_com[0][0], 0, 4*static_cast<int>(maxall)*sizeof(double));
-
-  double **x = atom->x;
-  int *mask = atom->mask;
-  int *type = atom->type;
-  imageint *image = atom->image;
-  double *mass = atom->mass;
-  double *rmass = atom->rmass;
-  double unwrap[3];
-
-  for (int i = 0; i < nlocal; i++) {
-    int imol = static_cast<int>(molecule[i]);
-    if (imol <= 0) continue;
-      double massone = (rmass)? rmass[i] : mass[type[i]];
-      domain->unmap(x[i],image[i],unwrap);
-      mols_com[imol][0] += unwrap[0] * massone;
-      mols_com[imol][1] += unwrap[1] * massone;
-      mols_com[imol][2] += unwrap[2] * massone;
-      mols_com[imol][3] += massone;
-  }
 
   // pack communication buffers for fulfilling requests
 
@@ -2501,6 +2506,15 @@ void Pair::update_mols_com()
       }
     }
   }
+  
+  // memory management
+
+  delete[] displs;
+  delete[] all_nbuff;
+  delete[] displs4;
+  delete[] all_nbuff4;
+
+  // END RENDEZVOUS BLOCK
 
   // divide by total mass to finally get COMs
 
@@ -2508,17 +2522,4 @@ void Pair::update_mols_com()
     if (mols_com[imol][3] == 0) continue;
     for (int j = 0; j < 3; j++) mols_com[imol][j] /= mols_com[imol][3];
   }
-
-  // debug
-
-  // printf("%f\n", mols_com[1][0]);
-  // printf("%f\n", mols_com[1][1]);
-  // printf("%f\n", mols_com[1][2]);
-
-  // memory management
-
-  delete[] displs;
-  delete[] all_nbuff;
-  delete[] displs4;
-  delete[] all_nbuff4;
 }
