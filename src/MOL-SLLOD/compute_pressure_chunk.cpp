@@ -50,23 +50,15 @@ ComputePressureChunk::ComputePressureChunk(LAMMPS *lmp, int narg, char **arg) :
   extvector = 0;
   pressflag = 1;
   timeflag = 1;
+<<<<<<< HEAD
   vmolflag = 1;
+=======
+  pressmoleculeflag = 1;
+>>>>>>> fix_property_molecule
 
-  // store temperature ID used by pressure computation
-  // insure it is valid for temperature computation
-  idchunk = strdup(arg[3]);
-  int icompute = modify->find_compute(idchunk);
-  if (icompute < 0)
-    error->all(FLERR,"Chunk/atom compute does not exist for "
-               "compute pressure/chunk");
-  cchunk = dynamic_cast<ComputeChunkAtom *>( modify->compute[icompute]);
-
-  if (strcmp(cchunk->style,"chunk/atom") != 0)
-    error->all(FLERR,"Compute pressure/chunk does not use chunk/atom compute");
-
-  if (strcmp(arg[4],"NULL") == 0) id_temp = nullptr;
+  if (strcmp(arg[3],"NULL") == 0) id_temp = nullptr;
   else {
-    id_temp = utils::strdup(arg[4]);
+    id_temp = utils::strdup(arg[3]);
 
     int icompute = modify->find_compute(id_temp);
     if (icompute < 0)
@@ -79,7 +71,7 @@ ComputePressureChunk::ComputePressureChunk(LAMMPS *lmp, int narg, char **arg) :
   // process optional args
 
   pairhybridflag = 0;
-  if (narg == 5) {
+  if (narg == 4) {
     keflag = 1;
     pairflag = 1;
     bondflag = angleflag = dihedralflag = improperflag = 1;
@@ -89,7 +81,7 @@ ComputePressureChunk::ComputePressureChunk(LAMMPS *lmp, int narg, char **arg) :
     pairflag = 0;
     bondflag = angleflag = dihedralflag = improperflag = 0;
     kspaceflag = fixflag = 0;
-    int iarg = 5;
+    int iarg = 4;
     while (iarg < narg) {
       if (strcmp(arg[iarg],"ke") == 0) keflag = 1;
       else if (strcmp(arg[iarg],"pair/hybrid") == 0) {
@@ -223,7 +215,7 @@ void ComputePressureChunk::init()
       vptr[nvirial++] = pairhybrid->virial;
     }
     */
-    if (pairflag && force->pair) vptr[nvirial++] = force->pair->chunk_virial;
+    if (pairflag && force->pair) vptr[nvirial++] = force->pair->molecule_virial;
     /*
     if (bondflag && force->bond) vptr[nvirial++] = force->bond->virial;
     if (angleflag && force->angle) vptr[nvirial++] = force->angle->virial;
@@ -320,9 +312,9 @@ void ComputePressureChunk::compute_vector()
     inv_volume = 1.0 / (domain->xprd * domain->yprd * domain->zprd);
     // TODO: overhaul this to use chunks where appropriate
     //virial_compute(6,3);
-    double *vchunk = force->pair->chunk_virial;
+    double *vmolecule = force->pair->molecule_virial;
     double v[9];
-    MPI_Allreduce(vchunk,v,9,MPI_DOUBLE,MPI_SUM,world);
+    MPI_Allreduce(vmolecule,v,9,MPI_DOUBLE,MPI_SUM,world);
     if (keflag) {
       for (int i = 0; i < 9; i++)
         vector[i] = (ke_tensor[i] + v[i]) * inv_volume * nktv2p;
@@ -332,9 +324,9 @@ void ComputePressureChunk::compute_vector()
     }
   } else {
     inv_volume = 1.0 / (domain->xprd * domain->yprd);
-    double *vchunk = force->pair->chunk_virial;
+    double *vmolecule = force->pair->molecule_virial;
     double v[9];
-    MPI_Allreduce(vchunk,v,9,MPI_DOUBLE,MPI_SUM,world);
+    MPI_Allreduce(vmolecule,v,9,MPI_DOUBLE,MPI_SUM,world);
 
     if (keflag) {
       for (int i = 0; i < 9; i++)

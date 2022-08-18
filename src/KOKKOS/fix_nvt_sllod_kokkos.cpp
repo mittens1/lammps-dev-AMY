@@ -51,7 +51,30 @@ FixNVTSllodKokkos<DeviceType>::FixNVTSllodKokkos(LAMMPS *lmp, int narg, char **a
   if (this->pstat_flag)
     this->error->all(FLERR,"Pressure control can not be used with fix nvt/kk");
 
-  if (this->mtchain_default_flag) this->mtchain = 1;
+  if (this->mtchain_default_flag) {
+    this->mtchain = 1;
+
+    // Fix allocation of chain thermostats so that size_vector is correct
+    int ich;
+    delete[] this->eta;
+    delete[] this->eta_dot;
+    delete[] this->eta_dotdot;
+    delete[] this->eta_mass;
+    this->eta = new double[this->mtchain];
+
+    // add one extra dummy thermostat, set to zero
+
+    this->eta_dot = new double[this->mtchain+1];
+    this->eta_dot[this->mtchain] = 0.0;
+    this->eta_dotdot = new double[this->mtchain];
+    for (ich = 0; ich < this->mtchain; ich++) {
+      this->eta[ich] = this->eta_dot[ich] = this->eta_dotdot[ich] = 0.0;
+    }
+    this->eta_mass = new double[this->mtchain];
+
+    // Default mtchain in fix_nh is 3.
+    this->size_vector -= 2*2*(3-this->mtchain);
+  }
 
   this->id_temp = utils::strdup(std::string(this->id)+"_temp");
   this->modify->add_compute(fmt::format("{} all temp/deform/kk",this->id_temp));

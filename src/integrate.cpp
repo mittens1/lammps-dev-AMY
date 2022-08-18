@@ -43,6 +43,7 @@ Integrate::~Integrate()
   delete [] vlist_global;
   delete [] vlist_atom;
   delete [] cvlist_atom;
+  delete [] vlist_mol;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -79,6 +80,7 @@ void Integrate::ev_setup()
   delete [] vlist_global;
   delete [] vlist_atom;
   delete [] cvlist_atom;
+  delete [] vlist_mol;
   elist_global = elist_atom = nullptr;
   vlist_global = vlist_atom = cvlist_atom = vlist_mol = nullptr;
 
@@ -90,7 +92,7 @@ void Integrate::ev_setup()
     if (modify->compute[i]->pressflag) nvlist_global++;
     if (modify->compute[i]->pressatomflag & 1) nvlist_atom++;
     if (modify->compute[i]->pressatomflag & 2) ncvlist_atom++;
-    if (modify->compute[i]->vmolflag) nvlist_mol++;
+    if (modify->compute[i]->pressmoleculeflag) nvlist_mol++;
   }
 
   if (nelist_global) elist_global = new Compute*[nelist_global];
@@ -113,7 +115,7 @@ void Integrate::ev_setup()
       vlist_atom[nvlist_atom++] = modify->compute[i];
     if (modify->compute[i]->pressatomflag & 2)
       cvlist_atom[ncvlist_atom++] = modify->compute[i];
-    if (modify->compute[i]->vmolflag)
+    if (modify->compute[i]->pressmoleculeflag)
       vlist_mol[nvlist_mol++] = modify->compute[i];
   }
 }
@@ -135,7 +137,7 @@ void Integrate::ev_setup()
      VIRIAL_FDOTR    bit for global virial via F dot r
      VIRIAL_ATOM     bit for per-atom virial
      VIRIAL_CENTROID bit for per-atom centroid virial
-     VIRIAL_MOL      bit for per-molecule virial
+     VIRIAL_MOL      bit for global molecular virial as sum of pairwise terms
    all force components (pair,bond,angle,...,kspace) use eflag/vflag
      in their ev_setup() method to set local energy/virial flags
 ------------------------------------------------------------------------- */

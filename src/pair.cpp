@@ -919,9 +919,15 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
   if (vflag & VIRIAL_CENTROID && centroidstressflag != CENTROID_AVAIL) vflag_atom = 1;
   cvflag_atom = 0;
   if (vflag & VIRIAL_CENTROID && centroidstressflag == CENTROID_AVAIL) cvflag_atom = 1;
+<<<<<<< HEAD
   vflag_mol = 0;
   if (vflag & VIRIAL_MOL) vflag_mol = 1;
   vflag_either = vflag_global || vflag_atom || cvflag_atom || vflag_mol;
+=======
+  vflag_molecule = 0;
+  if (vflag & VIRIAL_MOLECULE) vflag_molecule = 1;
+  vflag_either = vflag_global || vflag_atom || cvflag_atom || vflag_molecule;
+>>>>>>> fix_property_molecule
 
   evflag = eflag_either || vflag_either;
 
@@ -950,7 +956,10 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
   }
 
   /*************************** EVK Debug ************************/
+<<<<<<< HEAD
   //vflag_mol = 1;
+=======
+>>>>>>> fix_property_molecule
 
   // zero accumulators
   // use force->newton instead of newton_pair
@@ -988,6 +997,7 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
       cvatom[i][6] = 0.0;
       cvatom[i][7] = 0.0;
       cvatom[i][8] = 0.0;
+<<<<<<< HEAD
     }
   }
 
@@ -1002,6 +1012,22 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
     chunk_virial[7] = 0.0;
     chunk_virial[8] = 0.0;
     update_mols_com();
+=======
+      // cvatom[i][9] = 0.0; // NOTE: Memory allocated as Nx9, so this is probably wrong
+    }
+  }
+
+  if (vflag_molecule && alloc) {
+    molecule_virial[0] = 0.0;
+    molecule_virial[1] = 0.0;
+    molecule_virial[2] = 0.0;
+    molecule_virial[3] = 0.0;
+    molecule_virial[4] = 0.0;
+    molecule_virial[5] = 0.0;
+    molecule_virial[6] = 0.0;
+    molecule_virial[7] = 0.0;
+    molecule_virial[8] = 0.0;
+>>>>>>> fix_property_molecule
   }
   // run ev_setup option for TALLY computes
 
@@ -1589,37 +1615,37 @@ void Pair::ev_tally_chunk(int i, int j, int nlocal, int newton_pair,
     v[8] = delcomz*dely*fpair;
 
     if (newton_pair) {
-      chunk_virial[0] += v[0];
-      chunk_virial[1] += v[1];
-      chunk_virial[2] += v[2];
-      chunk_virial[3] += v[3];
-      chunk_virial[4] += v[4];
-      chunk_virial[5] += v[5];
-      chunk_virial[6] += v[6];
-      chunk_virial[7] += v[7];
-      chunk_virial[8] += v[8];
+      molecule_virial[0] += v[0];
+      molecule_virial[1] += v[1];
+      molecule_virial[2] += v[2];
+      molecule_virial[3] += v[3];
+      molecule_virial[4] += v[4];
+      molecule_virial[5] += v[5];
+      molecule_virial[6] += v[6];
+      molecule_virial[7] += v[7];
+      molecule_virial[8] += v[8];
     } else {
       if (i < nlocal) {
-        chunk_virial[0] += 0.5*v[0];
-        chunk_virial[1] += 0.5*v[1];
-        chunk_virial[2] += 0.5*v[2];
-        chunk_virial[3] += 0.5*v[3];
-        chunk_virial[4] += 0.5*v[4];
-        chunk_virial[5] += 0.5*v[5];
-        chunk_virial[6] += 0.5*v[6];
-        chunk_virial[7] += 0.5*v[7];
-        chunk_virial[8] += 0.5*v[8];
+        molecule_virial[0] += 0.5*v[0];
+        molecule_virial[1] += 0.5*v[1];
+        molecule_virial[2] += 0.5*v[2];
+        molecule_virial[3] += 0.5*v[3];
+        molecule_virial[4] += 0.5*v[4];
+        molecule_virial[5] += 0.5*v[5];
+        molecule_virial[6] += 0.5*v[6];
+        molecule_virial[7] += 0.5*v[7];
+        molecule_virial[8] += 0.5*v[8];
       }
       if (j < nlocal) {
-        chunk_virial[0] += 0.5*v[0];
-        chunk_virial[1] += 0.5*v[1];
-        chunk_virial[2] += 0.5*v[2];
-        chunk_virial[3] += 0.5*v[3];
-        chunk_virial[4] += 0.5*v[4];
-        chunk_virial[5] += 0.5*v[5];
-        chunk_virial[6] += 0.5*v[6];
-        chunk_virial[7] += 0.5*v[7];
-        chunk_virial[8] += 0.5*v[8];
+        molecule_virial[0] += 0.5*v[0];
+        molecule_virial[1] += 0.5*v[1];
+        molecule_virial[2] += 0.5*v[2];
+        molecule_virial[3] += 0.5*v[3];
+        molecule_virial[4] += 0.5*v[4];
+        molecule_virial[5] += 0.5*v[5];
+        molecule_virial[6] += 0.5*v[6];
+        molecule_virial[7] += 0.5*v[7];
+        molecule_virial[8] += 0.5*v[8];
       }
     }
   }
@@ -2331,11 +2357,12 @@ double Pair::memory_usage()
   return bytes;
 }
 
+
 /* ----------------------------------------------------------------------
   hackish method for updating mols_com inside pair.cpp
   to be replaced with fix/property/molecule
   ---------------------------------------------------------------------- */
-
+/*
 void Pair::update_mols_com() 
 {
   // initial info
@@ -2522,4 +2549,4 @@ void Pair::update_mols_com()
     if (mols_com[imol][3] == 0) continue;
     for (int j = 0; j < 3; j++) mols_com[imol][j] /= mols_com[imol][3];
   }
-}
+}*/
