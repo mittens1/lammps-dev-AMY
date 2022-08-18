@@ -14,7 +14,8 @@ post_commands: ! "neigh_modify delay 4\n
    compute shear_temp all temp/deform/chunk\n
    fix test all nvt/sllod/chunk temp 1.0 1.0 $(50.0*dt) kick no\n
    fix_modify test temp shear_temp\n
-   fix molprop all property/molecule com\n"
+   fix molprop all property/molecule com\n
+   compute molpress all pressure/chunk shear_temp virial"
 input_file: in.sllod-chunk
 natoms: 1792
 global_scalar: 1101.3362342114021
