@@ -111,6 +111,7 @@ void PairLJCutChunk::compute(int eflag, int vflag)
     nmax = atom->nmax;
     memory->create(molids, nmax, "pair/lj/cut/coul/cut/chunk:molids");
   }
+
   tagint nmolecule = atom->property_molecule->nmolecule;
   tagint *molecule = atom->molecule;
   for (ii = 0; ii < inum; ii++) {
