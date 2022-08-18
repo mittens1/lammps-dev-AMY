@@ -50,11 +50,7 @@ ComputePressureChunk::ComputePressureChunk(LAMMPS *lmp, int narg, char **arg) :
   extvector = 0;
   pressflag = 1;
   timeflag = 1;
-<<<<<<< HEAD
-  vmolflag = 1;
-=======
   pressmoleculeflag = 1;
->>>>>>> fix_property_molecule
 
   if (strcmp(arg[3],"NULL") == 0) id_temp = nullptr;
   else {
@@ -126,7 +122,7 @@ ComputePressureChunk::ComputePressureChunk(LAMMPS *lmp, int narg, char **arg) :
         bondflag = angleflag = dihedralflag = improperflag = 1;
         kspaceflag = fixflag = 1;
       } 
-      else if (strcmp(arg[iarg],"novmolflag") == 0) vmolflag = 0;
+      else if (strcmp(arg[iarg],"nomolvirial") == 0) pressmoleculeflag = 0;
       else error->all(FLERR,"Illegal compute pressure command");
       iarg++;
     }

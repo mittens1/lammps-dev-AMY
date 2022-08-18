@@ -70,7 +70,7 @@ PairLJCutCoulCutChunk::~PairLJCutCoulCutChunk()
 
 void PairLJCutCoulCutChunk::compute(int eflag, int vflag)
 {
-  for (int d = 0; d < 9; d++) chunk_virial[d] = 0.;    
+  for (int d = 0; d < 9; d++) molecule_virial[d] = 0.;    
     // hackish reset of chunk_virial
   
   int i, j, ii, jj, inum, jnum, itype, jtype;

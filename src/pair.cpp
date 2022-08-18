@@ -26,7 +26,7 @@
 #include "compute_com_chunk.h"
 #include "domain.h"
 #include "error.h"
-// #include "fix_property_molecule.h"
+#include "fix_property_molecule.h"
 #include "force.h"
 #include "kspace.h"
 #include "math_const.h"
@@ -132,13 +132,11 @@ Pair::Pair(LAMMPS *lmp) : Pointers(lmp)
   kokkosable = 0;
   copymode = 0;
 
-  mols_com = nullptr;
-
   // update_mols_com-specific
-  maxall = 0;
-  mol_is_local = mol_is_ghost = mol_is_requested = nullptr;
-  buff_mols = gather_mols = nullptr;
-  buff_mol_coms = gather_mol_coms = nullptr;
+  // maxall = 0;
+  // mol_is_local = mol_is_ghost = mol_is_requested = nullptr;
+  // buff_mols = gather_mols = nullptr;
+  // buff_mol_coms = gather_mol_coms = nullptr;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -161,14 +159,14 @@ Pair::~Pair()
   memory->destroy(cvatom);
 
   // update_mols_com-specific
-    if (mol_is_local != nullptr) delete[] mol_is_local;
-    if (mol_is_ghost != nullptr) delete[] mol_is_ghost;
-    if (mol_is_requested != nullptr) delete[] mol_is_requested;
-    memory->destroy(mols_com);
-    memory->destroy(buff_mols);
-    memory->destroy(gather_mols);
-    memory->destroy(buff_mol_coms);
-    memory->destroy(gather_mol_coms);
+  // if (mol_is_local != nullptr) delete[] mol_is_local;
+  // if (mol_is_ghost != nullptr) delete[] mol_is_ghost;
+  // if (mol_is_requested != nullptr) delete[] mol_is_requested;
+  // memory->destroy(mols_com);
+  // memory->destroy(buff_mols);
+  // memory->destroy(gather_mols);
+  // memory->destroy(buff_mol_coms);
+  // memory->destroy(gather_mol_coms);
 
 }
 
@@ -919,15 +917,9 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
   if (vflag & VIRIAL_CENTROID && centroidstressflag != CENTROID_AVAIL) vflag_atom = 1;
   cvflag_atom = 0;
   if (vflag & VIRIAL_CENTROID && centroidstressflag == CENTROID_AVAIL) cvflag_atom = 1;
-<<<<<<< HEAD
   vflag_mol = 0;
   if (vflag & VIRIAL_MOL) vflag_mol = 1;
   vflag_either = vflag_global || vflag_atom || cvflag_atom || vflag_mol;
-=======
-  vflag_molecule = 0;
-  if (vflag & VIRIAL_MOLECULE) vflag_molecule = 1;
-  vflag_either = vflag_global || vflag_atom || cvflag_atom || vflag_molecule;
->>>>>>> fix_property_molecule
 
   evflag = eflag_either || vflag_either;
 
@@ -954,12 +946,6 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
       memory->create(cvatom,comm->nthreads*maxcvatom,9,"pair:cvatom");
     }
   }
-
-  /*************************** EVK Debug ************************/
-<<<<<<< HEAD
-  //vflag_mol = 1;
-=======
->>>>>>> fix_property_molecule
 
   // zero accumulators
   // use force->newton instead of newton_pair
@@ -997,27 +983,11 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
       cvatom[i][6] = 0.0;
       cvatom[i][7] = 0.0;
       cvatom[i][8] = 0.0;
-<<<<<<< HEAD
-    }
-  }
-
-  if (vflag_mol && alloc) {
-    chunk_virial[0] = 0.0;
-    chunk_virial[1] = 0.0;
-    chunk_virial[2] = 0.0;
-    chunk_virial[3] = 0.0;
-    chunk_virial[4] = 0.0;
-    chunk_virial[5] = 0.0;
-    chunk_virial[6] = 0.0;
-    chunk_virial[7] = 0.0;
-    chunk_virial[8] = 0.0;
-    update_mols_com();
-=======
       // cvatom[i][9] = 0.0; // NOTE: Memory allocated as Nx9, so this is probably wrong
     }
   }
 
-  if (vflag_molecule && alloc) {
+  if (vflag_mol && alloc) {
     molecule_virial[0] = 0.0;
     molecule_virial[1] = 0.0;
     molecule_virial[2] = 0.0;
@@ -1027,7 +997,7 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
     molecule_virial[6] = 0.0;
     molecule_virial[7] = 0.0;
     molecule_virial[8] = 0.0;
->>>>>>> fix_property_molecule
+    // update_mols_com();
   }
   // run ev_setup option for TALLY computes
 
@@ -1565,7 +1535,7 @@ void Pair::ev_tally_tip4p(int key, int *list, double *v,
 
 /* ----------------------------------------------------------------------
    tally eng_vdwl and virial into global or per-atom accumulators
-   for chunk/molecular virial, have delx,dely,delz and fx,fy,fz
+   for global molecular virial, have delx,dely,delz and fx,fy,fz
    and delcomx, delcomy, delcomz (chunk centre-of-mass separation)
 ------------------------------------------------------------------------- */
 
@@ -1602,53 +1572,7 @@ void Pair::ev_tally_chunk(int i, int j, int nlocal, int newton_pair,
   }
 
     
-  // if(vflag_mol) {
-  if (true) {
-    v[0] = delcomx*delx*fpair;
-    v[1] = delcomy*dely*fpair;
-    v[2] = delcomz*delz*fpair;
-    v[3] = delcomx*dely*fpair;
-    v[4] = delcomx*delz*fpair;
-    v[5] = delcomy*delz*fpair;
-    v[6] = delcomy*delx*fpair;
-    v[7] = delcomz*delx*fpair;
-    v[8] = delcomz*dely*fpair;
-
-    if (newton_pair) {
-      molecule_virial[0] += v[0];
-      molecule_virial[1] += v[1];
-      molecule_virial[2] += v[2];
-      molecule_virial[3] += v[3];
-      molecule_virial[4] += v[4];
-      molecule_virial[5] += v[5];
-      molecule_virial[6] += v[6];
-      molecule_virial[7] += v[7];
-      molecule_virial[8] += v[8];
-    } else {
-      if (i < nlocal) {
-        molecule_virial[0] += 0.5*v[0];
-        molecule_virial[1] += 0.5*v[1];
-        molecule_virial[2] += 0.5*v[2];
-        molecule_virial[3] += 0.5*v[3];
-        molecule_virial[4] += 0.5*v[4];
-        molecule_virial[5] += 0.5*v[5];
-        molecule_virial[6] += 0.5*v[6];
-        molecule_virial[7] += 0.5*v[7];
-        molecule_virial[8] += 0.5*v[8];
-      }
-      if (j < nlocal) {
-        molecule_virial[0] += 0.5*v[0];
-        molecule_virial[1] += 0.5*v[1];
-        molecule_virial[2] += 0.5*v[2];
-        molecule_virial[3] += 0.5*v[3];
-        molecule_virial[4] += 0.5*v[4];
-        molecule_virial[5] += 0.5*v[5];
-        molecule_virial[6] += 0.5*v[6];
-        molecule_virial[7] += 0.5*v[7];
-        molecule_virial[8] += 0.5*v[8];
-      }
-    }
-  }
+  if(vflag_mol) vmol_tally(i, j, nlocal, newton_pair, fpair, delx, dely, delz);
 }
 
 /* ----------------------------------------------------------------------
@@ -1661,15 +1585,18 @@ void Pair::ev_tally_chunk(int i, int j, int nlocal, int newton_pair,
 void Pair::vmol_tally(int i, int j, int nlocal, int newton_pair,
                           double fpair, double delx, double dely, double delz)
 {
+  if (atom->property_molecule == nullptr ||
+      !atom->property_molecule->com_flag)
+    error->all(FLERR, "pair lj/cut/chunk requires a fix property/molecule to be defined with the com option");
+
   double delcom[3], v[9];
+  double **mols_com = atom->property_molecule->com;
 
-  int mol_i = static_cast<int>(atom->molecule[i]);
-  int mol_j = static_cast<int>(atom->molecule[j]);
+  tagint mol_i = atom->molecule[i]-1;
+  tagint mol_j = atom->molecule[j]-1;
 
-  if (mols_com != nullptr) {
-    for (int d = 0; d < 3; d++) {
-      delcom[d] = mols_com[mol_i][d] - mols_com[mol_j][d];
-    }
+  for (int d = 0; d < 3; d++) {
+    delcom[d] = mols_com[mol_i][d] - mols_com[mol_j][d];
   }
 
   v[0] = delcom[0]*delx*fpair;
@@ -1683,37 +1610,37 @@ void Pair::vmol_tally(int i, int j, int nlocal, int newton_pair,
   v[8] = delcom[2]*dely*fpair;
 
   if (newton_pair) {
-    chunk_virial[0] += v[0];
-    chunk_virial[1] += v[1];
-    chunk_virial[2] += v[2];
-    chunk_virial[3] += v[3];
-    chunk_virial[4] += v[4];
-    chunk_virial[5] += v[5];
-    chunk_virial[6] += v[6];
-    chunk_virial[7] += v[7];
-    chunk_virial[8] += v[8];
+    molecule_virial[0] += v[0];
+    molecule_virial[1] += v[1];
+    molecule_virial[2] += v[2];
+    molecule_virial[3] += v[3];
+    molecule_virial[4] += v[4];
+    molecule_virial[5] += v[5];
+    molecule_virial[6] += v[6];
+    molecule_virial[7] += v[7];
+    molecule_virial[8] += v[8];
   } else {
     if (i < nlocal) {
-      chunk_virial[0] += 0.5*v[0];
-      chunk_virial[1] += 0.5*v[1];
-      chunk_virial[2] += 0.5*v[2];
-      chunk_virial[3] += 0.5*v[3];
-      chunk_virial[4] += 0.5*v[4];
-      chunk_virial[5] += 0.5*v[5];
-      chunk_virial[6] += 0.5*v[6];
-      chunk_virial[7] += 0.5*v[7];
-      chunk_virial[8] += 0.5*v[8];
+      molecule_virial[0] += 0.5*v[0];
+      molecule_virial[1] += 0.5*v[1];
+      molecule_virial[2] += 0.5*v[2];
+      molecule_virial[3] += 0.5*v[3];
+      molecule_virial[4] += 0.5*v[4];
+      molecule_virial[5] += 0.5*v[5];
+      molecule_virial[6] += 0.5*v[6];
+      molecule_virial[7] += 0.5*v[7];
+      molecule_virial[8] += 0.5*v[8];
     }
     if (j < nlocal) {
-      chunk_virial[0] += 0.5*v[0];
-      chunk_virial[1] += 0.5*v[1];
-      chunk_virial[2] += 0.5*v[2];
-      chunk_virial[3] += 0.5*v[3];
-      chunk_virial[4] += 0.5*v[4];
-      chunk_virial[5] += 0.5*v[5];
-      chunk_virial[6] += 0.5*v[6];
-      chunk_virial[7] += 0.5*v[7];
-      chunk_virial[8] += 0.5*v[8];
+      molecule_virial[0] += 0.5*v[0];
+      molecule_virial[1] += 0.5*v[1];
+      molecule_virial[2] += 0.5*v[2];
+      molecule_virial[3] += 0.5*v[3];
+      molecule_virial[4] += 0.5*v[4];
+      molecule_virial[5] += 0.5*v[5];
+      molecule_virial[6] += 0.5*v[6];
+      molecule_virial[7] += 0.5*v[7];
+      molecule_virial[8] += 0.5*v[8];
     }
   }
 }
@@ -1729,14 +1656,13 @@ void Pair::vmol_tally_xyz(int i, int j, int nlocal, int newton_pair,
                           double fx, double fy, double fz)
 {
   double delcom[3], v[9];
+  double **mols_com = atom->property_molecule->com;
 
-  int mol_i = atom->molecule[i];
-  int mol_j = atom->molecule[j];
+  tagint mol_i = atom->molecule[i]-1;
+  tagint mol_j = atom->molecule[j]-1;
 
-  if (mols_com != nullptr) {
-    for (int d = 0; d < 3; d++) {
-      delcom[d] = mols_com[mol_i][d] - mols_com[mol_j][d];
-    }
+  for (int d = 0; d < 3; d++) {
+    delcom[d] = mols_com[mol_i][d] - mols_com[mol_j][d];
   }
 
   v[0] = delcom[0]*fx;
@@ -1750,37 +1676,37 @@ void Pair::vmol_tally_xyz(int i, int j, int nlocal, int newton_pair,
   v[8] = delcom[2]*fy;
 
   if (newton_pair) {
-    chunk_virial[0] += v[0];
-    chunk_virial[1] += v[1];
-    chunk_virial[2] += v[2];
-    chunk_virial[3] += v[3];
-    chunk_virial[4] += v[4];
-    chunk_virial[5] += v[5];
-    chunk_virial[6] += v[6];
-    chunk_virial[7] += v[7];
-    chunk_virial[8] += v[8];
+    molecule_virial[0] += v[0];
+    molecule_virial[1] += v[1];
+    molecule_virial[2] += v[2];
+    molecule_virial[3] += v[3];
+    molecule_virial[4] += v[4];
+    molecule_virial[5] += v[5];
+    molecule_virial[6] += v[6];
+    molecule_virial[7] += v[7];
+    molecule_virial[8] += v[8];
   } else {
     if (i < nlocal) {
-      chunk_virial[0] += 0.5*v[0];
-      chunk_virial[1] += 0.5*v[1];
-      chunk_virial[2] += 0.5*v[2];
-      chunk_virial[3] += 0.5*v[3];
-      chunk_virial[4] += 0.5*v[4];
-      chunk_virial[5] += 0.5*v[5];
-      chunk_virial[6] += 0.5*v[6];
-      chunk_virial[7] += 0.5*v[7];
-      chunk_virial[8] += 0.5*v[8];
+      molecule_virial[0] += 0.5*v[0];
+      molecule_virial[1] += 0.5*v[1];
+      molecule_virial[2] += 0.5*v[2];
+      molecule_virial[3] += 0.5*v[3];
+      molecule_virial[4] += 0.5*v[4];
+      molecule_virial[5] += 0.5*v[5];
+      molecule_virial[6] += 0.5*v[6];
+      molecule_virial[7] += 0.5*v[7];
+      molecule_virial[8] += 0.5*v[8];
     }
     if (j < nlocal) {
-      chunk_virial[0] += 0.5*v[0];
-      chunk_virial[1] += 0.5*v[1];
-      chunk_virial[2] += 0.5*v[2];
-      chunk_virial[3] += 0.5*v[3];
-      chunk_virial[4] += 0.5*v[4];
-      chunk_virial[5] += 0.5*v[5];
-      chunk_virial[6] += 0.5*v[6];
-      chunk_virial[7] += 0.5*v[7];
-      chunk_virial[8] += 0.5*v[8];
+      molecule_virial[0] += 0.5*v[0];
+      molecule_virial[1] += 0.5*v[1];
+      molecule_virial[2] += 0.5*v[2];
+      molecule_virial[3] += 0.5*v[3];
+      molecule_virial[4] += 0.5*v[4];
+      molecule_virial[5] += 0.5*v[5];
+      molecule_virial[6] += 0.5*v[6];
+      molecule_virial[7] += 0.5*v[7];
+      molecule_virial[8] += 0.5*v[8];
     }
   }
 }
