@@ -283,30 +283,21 @@ class Pair : protected Pointers {
   void ev_tally_tip4p(int, int *, double *, double, double);
   void ev_tally_xyz(int, int, int, int, double, double, double, double, double, double, double,
                     double);
-  void ev_tally_chunk(int, int, int, int, double, double, double,
-                      double, double, double, double, double, double);
   void v_tally2(int, int, double, double *);
   void v_tally_tensor(int, int, int, int, double, double, double, double, double, double);
+
+  void vmol_tally(int, int, int, int, double, double, double, double);
+  void vmol_tally_xyz(int, int, int, int, double, double, double);
 
   void virial_fdotr_compute();
 
   inline int sbmask(int j) const { return j >> SBBITS & 3; }
 
-/**************** EVK DEBUG *********************/
  public:
   double molecule_virial[9];             // Accumulated molecular virial
   int vflag_mol;
 
-  void vmol_tally(int, int, int, int, double, double, double, double);
-  void vmol_tally_xyz(int, int, int, int, double, double, double);
 
- private:
-  // update_mols_com-specific
-  // void update_mols_com();
-  // tagint maxall;
-  // bool *mol_is_local, *mol_is_ghost, *mol_is_requested;
-  // int *buff_mols, *gather_mols;
-  // double *buff_mol_coms, *gather_mol_coms;
 };
 
 }    // namespace LAMMPS_NS

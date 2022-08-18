@@ -132,11 +132,6 @@ Pair::Pair(LAMMPS *lmp) : Pointers(lmp)
   kokkosable = 0;
   copymode = 0;
 
-  // update_mols_com-specific
-  // maxall = 0;
-  // mol_is_local = mol_is_ghost = mol_is_requested = nullptr;
-  // buff_mols = gather_mols = nullptr;
-  // buff_mol_coms = gather_mol_coms = nullptr;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -157,16 +152,6 @@ Pair::~Pair()
   memory->destroy(eatom);
   memory->destroy(vatom);
   memory->destroy(cvatom);
-
-  // update_mols_com-specific
-  // if (mol_is_local != nullptr) delete[] mol_is_local;
-  // if (mol_is_ghost != nullptr) delete[] mol_is_ghost;
-  // if (mol_is_requested != nullptr) delete[] mol_is_requested;
-  // memory->destroy(mols_com);
-  // memory->destroy(buff_mols);
-  // memory->destroy(gather_mols);
-  // memory->destroy(buff_mol_coms);
-  // memory->destroy(gather_mol_coms);
 
 }
 
@@ -987,7 +972,7 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
     }
   }
 
-  if (vflag_mol && alloc) {
+  if (vflag_mol) {
     molecule_virial[0] = 0.0;
     molecule_virial[1] = 0.0;
     molecule_virial[2] = 0.0;
@@ -997,7 +982,6 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
     molecule_virial[6] = 0.0;
     molecule_virial[7] = 0.0;
     molecule_virial[8] = 0.0;
-    // update_mols_com();
   }
   // run ev_setup option for TALLY computes
 
@@ -1028,6 +1012,7 @@ void Pair::ev_unset()
   vflag_atom = 0;
   cvflag_atom = 0;
   vflag_fdotr = 0;
+  vflag_mol = 0;
 }
 
 /* ----------------------------------------------------------------------
@@ -1120,6 +1105,8 @@ void Pair::ev_tally(int i, int j, int nlocal, int newton_pair,
         vatom[j][5] += 0.5*v[5];
       }
     }
+
+    if (vflag_mol) vmol_tally(i, j, nlocal, newton_pair, fpair, delx, dely, delz);
   }
 
   if (num_tally_compute > 0) {
@@ -1130,7 +1117,6 @@ void Pair::ev_tally(int i, int j, int nlocal, int newton_pair,
     }
   }
 
-  if (vflag_mol) vmol_tally(i, j, nlocal, newton_pair, fpair, delx, dely, delz);
 }
 
 /* ----------------------------------------------------------------------
@@ -1176,10 +1162,9 @@ void Pair::ev_tally_full(int i, double evdwl, double ecoul, double fpair,
       vatom[i][4] += v[4];
       vatom[i][5] += v[5];
     }
+    // if (vflag_mol) vmol_tally(i, j, nlocal, 0, fpair, delx, dely, delz);
+    // can't tally vflag_mol without knowing j
   }
-  
-  // if (vflag_mol) vmol_tally(i, j, nlocal, 0, fpair, delx, dely, delz);
-  // can't tally vflag_mol without knowing j
 }
 
 /* ----------------------------------------------------------------------
@@ -1273,8 +1258,9 @@ void Pair::ev_tally_xyz(int i, int j, int nlocal, int newton_pair,
         vatom[j][5] += 0.5*v[5];
       }
     }
+
+    if (vflag_mol) vmol_tally_xyz(i, j, nlocal, newton_pair, fx, fy, fz);
   }
-  if (vflag_mol) vmol_tally_xyz(i, j, nlocal, newton_pair, fx, fy, fz);
 }
 
 /* ----------------------------------------------------------------------
@@ -1327,8 +1313,9 @@ void Pair::ev_tally_xyz_full(int i, double evdwl, double ecoul,
       vatom[i][4] += v[4];
       vatom[i][5] += v[5];
     }
+    // Can't do full neighbour lists for now without knowing j
+    // if (vflag_mol) vmol_tally_xyz_full(i, 0, fx, fy, fz);
   }
-  // if (vflag_mol) vmol_tally_xyz(i, j, nlocal, 0, fx, fy, fz, delx, dely, delz);
 }
 
 /* ----------------------------------------------------------------------
@@ -1385,6 +1372,8 @@ void Pair::ev_tally3(int i, int j, int k, double evdwl, double ecoul,
       vatom[k][2] += THIRD*v[2]; vatom[k][3] += THIRD*v[3];
       vatom[k][4] += THIRD*v[4]; vatom[k][5] += THIRD*v[5];
     }
+
+    // Assuming 3 body forces are intramolecular, so no contribution to molecule_virial
   }
 }
 
@@ -1444,6 +1433,8 @@ void Pair::ev_tally4(int i, int j, int k, int m, double evdwl,
       vatom[m][0] += v[0]; vatom[m][1] += v[1]; vatom[m][2] += v[2];
       vatom[m][3] += v[3]; vatom[m][4] += v[4]; vatom[m][5] += v[5];
     }
+
+    // Assuming 4 body forces are intramolecular, so no contribution to molecule_virial
   }
 }
 
@@ -1534,52 +1525,10 @@ void Pair::ev_tally_tip4p(int key, int *list, double *v,
 }
 
 /* ----------------------------------------------------------------------
-   tally eng_vdwl and virial into global or per-atom accumulators
-   for global molecular virial, have delx,dely,delz and fx,fy,fz
-   and delcomx, delcomy, delcomz (chunk centre-of-mass separation)
-------------------------------------------------------------------------- */
-
-void Pair::ev_tally_chunk(int i, int j, int nlocal, int newton_pair,
-                          double evdwl, double ecoul, double fpair,
-                          double delx, double dely, double delz,
-                          double delcomx, double delcomy, double delcomz)
-{
-  double evdwlhalf,ecoulhalf,epairhalf,v[9];
-
-  if (eflag_either) {
-    if (eflag_global) {
-      if (newton_pair) {
-        eng_vdwl += evdwl;
-        eng_coul += ecoul;
-      } else {
-        evdwlhalf = 0.5*evdwl;
-        ecoulhalf = 0.5*ecoul;
-        if (i < nlocal) {
-          eng_vdwl += evdwlhalf;
-          eng_coul += ecoulhalf;
-        }
-        if (j < nlocal) {
-          eng_vdwl += evdwlhalf;
-          eng_coul += ecoulhalf;
-        }
-      }
-    }
-    if (eflag_atom) {
-      epairhalf = 0.5 * (evdwl + ecoul);
-      if (newton_pair || i < nlocal) eatom[i] += epairhalf;
-      if (newton_pair || j < nlocal) eatom[j] += epairhalf;
-    }
-  }
-
-    
-  if(vflag_mol) vmol_tally(i, j, nlocal, newton_pair, fpair, delx, dely, delz);
-}
-
-/* ----------------------------------------------------------------------
    tally molecular virials into global accumulator
    have delx, dely, delz and fpair (which gives fx, fy, fz)
    get delcomx, delcomy, delcomz (chunk centre-of-mass separation)
-   from mols_com
+   from atom->property_molecule
 ------------------------------------------------------------------------- */
 
 void Pair::vmol_tally(int i, int j, int nlocal, int newton_pair,
@@ -1590,13 +1539,18 @@ void Pair::vmol_tally(int i, int j, int nlocal, int newton_pair,
     error->all(FLERR, "pair lj/cut/chunk requires a fix property/molecule to be defined with the com option");
 
   double delcom[3], v[9];
-  double **mols_com = atom->property_molecule->com;
+  double **com = atom->property_molecule->com;
 
   tagint mol_i = atom->molecule[i]-1;
   tagint mol_j = atom->molecule[j]-1;
+  double *com_i, *com_j;
+  if (mol_i < 0) com_i = atom->x[i];
+  else com_i = com[mol_i];
+  if (mol_j < 0) com_j = atom->x[j];
+  else com_j = com[mol_j];
 
   for (int d = 0; d < 3; d++) {
-    delcom[d] = mols_com[mol_i][d] - mols_com[mol_j][d];
+    delcom[d] = com_i[d] - com_j[d];
   }
 
   v[0] = delcom[0]*delx*fpair;
@@ -1656,13 +1610,19 @@ void Pair::vmol_tally_xyz(int i, int j, int nlocal, int newton_pair,
                           double fx, double fy, double fz)
 {
   double delcom[3], v[9];
-  double **mols_com = atom->property_molecule->com;
+  double **com = atom->property_molecule->com;
 
   tagint mol_i = atom->molecule[i]-1;
   tagint mol_j = atom->molecule[j]-1;
 
+  double *com_i, *com_j;
+  if (mol_i < 0) com_i = atom->x[i];
+  else com_i = com[i];
+  if (mol_j < 0) com_j = atom->x[j];
+  else com_j = com[j];
+
   for (int d = 0; d < 3; d++) {
-    delcom[d] = mols_com[mol_i][d] - mols_com[mol_j][d];
+    delcom[d] = com_i[d] - com_j[d];
   }
 
   v[0] = delcom[0]*fx;
@@ -2282,197 +2242,3 @@ double Pair::memory_usage()
   bytes += (double)comm->nthreads*maxcvatom*9 * sizeof(double);
   return bytes;
 }
-
-
-/* ----------------------------------------------------------------------
-  hackish method for updating mols_com inside pair.cpp
-  to be replaced with fix/property/molecule
-  ---------------------------------------------------------------------- */
-/*
-void Pair::update_mols_com() 
-{
-  // initial info
-  
-  int nlocal = atom->nlocal;
-  int nall = nlocal + atom->nghost;
-  int nprocs = comm->nprocs;
-  int me = comm->me;
-
-  // get total number of molecules
-
-  tagint *molecule = atom->molecule;
-  tagint maxone = -1;
-  for (int i = 0; i < nlocal; i++)
-    if (molecule[i] > maxone) maxone = molecule[i];
-  tagint maxall_new;
-  MPI_Allreduce(&maxone, &maxall_new, 1, MPI_LMP_TAGINT, MPI_MAX, world);
-  if (maxall_new > MAXSMALLINT) error->all(FLERR, "Molecule IDs too large for molecular COM update in pair.cpp");
-  maxall_new++; // make sure we allocate enough because molecule IDs start from 1
-  
-  // grow arrays if needed
-  if (maxall_new > maxall) {
-    if (mol_is_local != nullptr) delete[] mol_is_local;
-    if (mol_is_ghost != nullptr) delete[] mol_is_ghost;
-    if (mol_is_requested != nullptr) delete[] mol_is_requested;
-    memory->destroy(mols_com);
-    memory->destroy(buff_mols);
-    memory->destroy(gather_mols);
-    memory->destroy(buff_mol_coms);
-    memory->destroy(gather_mol_coms);
-    maxall = maxall_new;
-    int maxall_int = static_cast<int>(maxall);
-    mol_is_local = new bool[maxall_int];
-    mol_is_ghost = new bool[maxall_int];
-    mol_is_requested = new bool[maxall_int];
-    memory->create(mols_com, maxall_int, 4, "pair:mols_com"); // [0-3]: comx,y,z; [4]: mass
-    memory->create(buff_mols, maxall_int, "pair:buff_mols");
-    memory->create(gather_mols, maxall_int*nprocs, "pair:gather_mols");
-    memory->create(buff_mol_coms, maxall_int*4, "pair:buff_mol_coms");
-    memory->create(gather_mol_coms, maxall_int*nprocs*4, "pair:gather_mol_coms");
-  }
-
-  // calculate local COMs -- normalize with mass at end
-  // after including ghost contribs
-
-  memset(&mols_com[0][0], 0, 4*static_cast<int>(maxall)*sizeof(double));
-
-  double **x = atom->x;
-  int *mask = atom->mask;
-  int *type = atom->type;
-  imageint *image = atom->image;
-  double *mass = atom->mass;
-  double *rmass = atom->rmass;
-  double unwrap[3];
-
-  memset(mol_is_local, false, sizeof(bool) * static_cast<int>(maxall));
-  
-  for (int i = 0; i < nlocal; i++) {
-    int imol = static_cast<int>(molecule[i]);
-    if (imol <= 0) continue;
-      double massone = (rmass)? rmass[i] : mass[type[i]];
-      domain->unmap(x[i],image[i],unwrap);
-      mols_com[imol][0] += unwrap[0] * massone;
-      mols_com[imol][1] += unwrap[1] * massone;
-      mols_com[imol][2] += unwrap[2] * massone;
-      mols_com[imol][3] += massone;
-      mol_is_local[imol] = true;
-  }
-
-  // START Rendezvous Block
-  //
-  // The Rendezvous Block should be replaceable with
-  // MPI_Allreduce(&mols_com[0][0], static_cast<int>(maxall)*4, MPI_DOUBLE,
-  // MPI_SUM, world);
-  // This Rendezvous routine in theory avoids sending lots of 0.0s into the
-  // Allreduce -- in practice, it is worth optimizing and possibly even making a
-  // code branch which we can turn on or off.
-
-  // get list of local and ghost molecules
-  // as well as number of local and ghost molecules
-
-  memset(mol_is_ghost, false, sizeof(bool) * static_cast<int>(maxall));
-
-  for (int i = nlocal; i < nall; i++) {
-    int imol = static_cast<int>(molecule[i]);
-    if (imol <= 0) continue;
-    mol_is_ghost[imol] = true;
-  }
-
-  // rendezvous 1: all procs send lists of mols for which they own ghost atoms
-  // because they need to receive information about those mols
-
-  memset(buff_mols, 0, sizeof(int) * static_cast<int>(maxall));
-  memset(gather_mols, 0, sizeof(int) * static_cast<int>(maxall) * nprocs);
-  
-  int nbuff = 0;
-
-  for (int imol = 0; imol < static_cast<int>(maxall); imol++) {
-    if (mol_is_ghost[imol]) buff_mols[nbuff++] = imol;
-  }
-
-  int* displs = new int[nprocs];
-  int* all_nbuff = new int[nprocs];
-
-  MPI_Allgather(&nbuff, 1, MPI_INT, all_nbuff, 1, MPI_INT, world);
-
-  displs[0] = 0;
-  for (int n = 1; n < nprocs; n++) displs[n] = displs[n-1] + all_nbuff[n-1];
-
-  MPI_Allgatherv(buff_mols, nbuff, MPI_INT, gather_mols, all_nbuff, displs, MPI_INT, world);
-
-  // now gather_mols holds all molecule numbers requested by all procs
-  // (including me!!)
-
-  // pack communication buffers for fulfilling requests
-
-  nbuff = 0;
-  memset(mol_is_requested, false, sizeof(bool) * static_cast<int>(maxall));
-  // std::fill(std::begin(buff_mols), std::end(buff_mols), 0); maybe needed
-  // std::fill(std::begin(buff_mol_coms), std::end(buff_mol_coms), 0); maybe needed
-  
-  for (int n = 0; n < nprocs; n++) {
-    if (n == me) continue;
-    for (int nb = displs[n]; nb < displs[n] + all_nbuff[n]; nb++) {
-      int requested_mol = gather_mols[nb];
-      if (mol_is_local[requested_mol] && !mol_is_requested[requested_mol]) { // only list req'd mols once
-        mol_is_requested[requested_mol] = true;
-        for (int j = 0; j < 4; j++) buff_mol_coms[nbuff*4+j] = mols_com[requested_mol][j];
-        buff_mols[nbuff++] = requested_mol; // now buff_mols tracks mols to send
-      }
-    }
-  }
-  
-  // rendezvous 2: all procs send lists of mols for which:
-  // they own local atoms and other procs requested information
-  // and then send the actual molcom information
-
-  MPI_Allgather(&nbuff, 1, MPI_INT, all_nbuff, 1, MPI_INT, world);
-
-  displs[0] = 0;
-  for (int n = 1; n < nprocs; n++) displs[n] = displs[n-1] + all_nbuff[n-1];
-
-  MPI_Allgatherv(buff_mols, nbuff, MPI_INT, gather_mols, all_nbuff, displs, MPI_INT, world);
-
-  // now gather_mols holds all molecule numbers request-fulfilled by all procs
-  // (including me!!)
-
-  // sending and gathering molcom information:
-
-  int* all_nbuff4 = new int[nprocs];
-  int* displs4 = new int[nprocs];
-
-  for (int n = 0; n < nprocs; n++) {
-    all_nbuff4[n] = all_nbuff[n] * 4;
-    displs4[n] = displs[n] * 4;
-  }
-
-  MPI_Allgatherv(buff_mol_coms, nbuff*4, MPI_DOUBLE, gather_mol_coms, all_nbuff4, displs4, MPI_DOUBLE, world);
-
-  // add gather_mol_coms information to my information
-
-  for (int n = 0; n < nprocs; n++) {
-    if (n == me) continue;
-    for (int nb = displs[n]; nb < displs[n] + all_nbuff[n]; nb++) {
-      int received_mol = gather_mols[nb];
-      if (mol_is_ghost[received_mol]) { // may get info from multiple procs!
-        for (int j = 0; j < 4; j++) mols_com[received_mol][j] += gather_mol_coms[nb*4+j];
-      }
-    }
-  }
-  
-  // memory management
-
-  delete[] displs;
-  delete[] all_nbuff;
-  delete[] displs4;
-  delete[] all_nbuff4;
-
-  // END RENDEZVOUS BLOCK
-
-  // divide by total mass to finally get COMs
-
-  for (int imol = 0; imol < static_cast<int>(maxall); imol++) {
-    if (mols_com[imol][3] == 0) continue;
-    for (int j = 0; j < 3; j++) mols_com[imol][j] /= mols_com[imol][3];
-  }
-}*/
