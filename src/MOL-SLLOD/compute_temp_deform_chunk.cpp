@@ -17,6 +17,7 @@
 ------------------------------------------------------------------------- */
 
 #include "compute_temp_deform_chunk.h"
+#include "fix_property_molecule.h"
 
 #include "atom.h"
 #include "comm.h"
@@ -37,15 +38,12 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 ComputeTempDeformChunk::ComputeTempDeformChunk(LAMMPS *lmp, int narg, char **arg) :
-  Compute(lmp, narg, arg),
-  which(nullptr), idchunk(nullptr), id_bias(nullptr), sum(nullptr), sumall(nullptr), count(nullptr),
-  countall(nullptr), massproc(nullptr), masstotal(nullptr), vcm(nullptr), vcmall(nullptr),
-  com(nullptr), comall(nullptr)
+  Compute(lmp, narg, arg), vcm(nullptr), vcmall(nullptr)
 {
-  if (narg < 4) error->all(FLERR,"Illegal compute temp/chunk/deform command");
+  if (narg != 3) error->all(FLERR,"Illegal compute temp/chunk/deform command");
 
   scalar_flag = vector_flag = 1;
-  size_vector = 6;
+  size_vector = 9;
   extscalar = 0;
   extvector = 1;
   tempflag = 1;
@@ -54,81 +52,47 @@ ComputeTempDeformChunk::ComputeTempDeformChunk(LAMMPS *lmp, int narg, char **arg
   vbiasall = nullptr;
   vthermal = nullptr;
 
-  // ID of compute chunk/atom
 
-  idchunk = utils::strdup(arg[3]);
-
-  ComputeTempDeformChunk::init();
-
-  // optional per-chunk values
-
-  nvalues = narg-4;
-  which = new int[nvalues];
-  nvalues = 0;
-
-  int iarg = 4;
-
-  // optional args
-
-  comflag = 0;
-  biasflag = 0;
   adof = domain->dimension;
   cdof = 0.0;
-  // vector data
 
+  // vector data
   vector = new double[size_vector];
 
 
-  if (nvalues)  {
-    array_flag = 1;
-    size_array_cols = nvalues;
-    size_array_rows = 0;
-    size_array_rows_variable = 1;
-    extarray = 0;
-  }
+  array_flag = 1;
+  size_array_cols = 3;
+  size_array_rows = 0;
+  size_array_rows_variable = 1;
+  extarray = 0;
 
   // chunk-based data
-  nchunk = 1;
-  maxchunk = 0;
   nmax = 0;
-  allocate();
-  comstep = -1;
 }
 
 /* ---------------------------------------------------------------------- */
 
 ComputeTempDeformChunk::~ComputeTempDeformChunk()
 {
-  delete [] idchunk;
-  delete [] which;
-  delete [] id_bias;
   delete [] vector;
-  memory->destroy(sum);
-  memory->destroy(sumall);
-  memory->destroy(count);
-  memory->destroy(countall);
-  memory->destroy(array);
-  memory->destroy(massproc);
-  memory->destroy(masstotal);
-  memory->destroy(com);
-  memory->destroy(comall);
-  memory->destroy(vcm);
-  memory->destroy(vcmall);
   memory->destroy(vbiasall);
   memory->destroy(vthermal);
+
+  // property_molecule may have already been destroyed
+  if (atom->property_molecule != nullptr)
+    atom->property_molecule->destroy_permolecule(vcmall);
 }
 
 /* ---------------------------------------------------------------------- */
 
 void ComputeTempDeformChunk::init()
 {
-  int icompute = modify->find_compute(idchunk);
-  if (icompute < 0)
-    error->all(FLERR,"Chunk/atom compute does not exist for "
-               "compute temp/chunk/deform");
-  cchunk = dynamic_cast<ComputeChunkAtom *>( modify->compute[icompute]);
-  if (strcmp(cchunk->style,"chunk/atom") != 0)
-    error->all(FLERR,"compute temp/chunk/deform does not use chunk/atom compute");
+  if (atom->property_molecule == nullptr || 
+      !atom->property_molecule->com_flag)
+    error->all(FLERR, "compute temp/deform/chunk requires a fix property/molecule to be defined with the com option");
+
+  atom->property_molecule->register_permolecule("temp/deform/chunk:vcmall", &vcmall, Atom::DOUBLE, 3);
+  atom->property_molecule->register_permolecule("temp/deform/chunk:vcm", &vcm, Atom::DOUBLE, 3);
 
   auto fixes = modify->get_fix_by_style("^deform");
   if (fixes.size() > 0) {
@@ -138,6 +102,15 @@ void ComputeTempDeformChunk::init()
     error->warning(FLERR, "Using compute temp/deform with no fix deform defined");
 }
 
+void ComputeTempDeformChunk::setup()
+{
+  // Make sure fix property/molecule exists
+  if (atom->property_molecule == nullptr || 
+      !atom->property_molecule->com_flag)
+    error->all(FLERR, "compute temp/deform/chunk requires a fix property/molecule to be defined with the com option");
+}
+
+
 /* ---------------------------------------------------------------------- */
 
 double ComputeTempDeformChunk::compute_scalar()
@@ -145,21 +118,14 @@ double ComputeTempDeformChunk::compute_scalar()
   int i;
   invoked_scalar = update->ntimestep;
 
-  // calculate chunk assignments,
-  //   since only atoms in chunks contribute to global temperature
-  // compute chunk/atom assigns atoms to chunk IDs
-  // extract ichunk index vector from compute
-  // ichunk = 1 to Nchunk for included atoms, 0 for excluded atoms
+  tagint nmolecule = atom->property_molecule->nmolecule;
+  tagint *molecule = atom->molecule;
 
-  nchunk = cchunk->setup_chunks();
-  cchunk->compute_ichunk();
-  int *ichunk = cchunk->ichunk;
-
-  if ((nchunk > maxchunk) || (atom->nlocal > nmax)) allocate();
-
-  // calculate COM position for each chunk
-  // This will be used to calculate the streaming velocity at the chunk's COM
-  com_compute();
+  // Update COM if it isn't already (generally should be)
+  if (atom->property_molecule->comstep != update->ntimestep)
+    atom->property_molecule->com_compute();
+  double **com = atom->property_molecule->com;
+  double *molmass = atom->property_molecule->mass;
  
   // lamda = COM position in triclinic lamda coords
   // vstream = COM streaming velocity = Hrate*lamda + Hratelo. Will be the same for each atom in the chunk
@@ -177,20 +143,22 @@ double ComputeTempDeformChunk::compute_scalar()
   int *type = atom->type;
   int *mask = atom->mask;
   int nlocal = atom->nlocal;
-  int index;
+  tagint m;
   int xbox, ybox, zbox;
   imageint *image = atom->image;
+
+  if (nlocal > nmax) allocate();
 
   double t = 0.0;
   int mycount = 0;
  
   for (i = 0; i < atom->nlocal; i++) {
     if (mask[i] & groupbit) {
-      index = ichunk[i]-1;
-      if (index < 0) continue;
+      m = molecule[i]-1;
+      if (m < 0) continue;
 
       // Calculate streaming velocity at the chunk's centre of mass 
-      domain->x2lamda(comall[index], lamda);
+      domain->x2lamda(com[m], lamda);
       vstream_chunk[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
       vstream_chunk[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
       vstream_chunk[2] = h_rate[2] * lamda[2] + h_ratelo[2];
@@ -214,9 +182,9 @@ double ComputeTempDeformChunk::compute_scalar()
   vcm_thermal_compute();
 
   // Tally up the chunk COM velocities to get the kinetic temperature
-  for (i = 0; i < nchunk; i++) {
-    t += (vcmall[i][0]*vcmall[i][0] + vcmall[i][1]*vcmall[i][1] + vcmall[i][2]*vcmall[i][2]) * 
-          masstotal[i];
+  for (m = 0; m < nmolecule; m++) {
+    t += (vcmall[m][0]*vcmall[m][0] + vcmall[m][1]*vcmall[m][1] + vcmall[m][2]*vcmall[m][2]) * 
+          molmass[m];
   } 
 
   // final temperature
@@ -235,21 +203,14 @@ void ComputeTempDeformChunk::compute_vector()
 
   invoked_vector = update->ntimestep;
 
-  // calculate chunk assignments,
-  //   since only atoms in chunks contribute to global temperature
-  // compute chunk/atom assigns atoms to chunk IDs
-  // extract ichunk index vector from compute
-  // ichunk = 1 to Nchunk for included atoms, 0 for excluded atoms
+  tagint *molecule = atom->molecule;
+  tagint nmolecule = atom->property_molecule->nmolecule;
+  double **com = atom->property_molecule->com;
+  double *molmass = atom->property_molecule->mass;
 
-  nchunk = cchunk->setup_chunks();
-  cchunk->compute_ichunk();
-  int *ichunk = cchunk->ichunk;
-
-  if (nchunk > maxchunk) allocate();
-
-  // calculate COM position and velocity for each chunk
-  // This will be used to calculate the streaming velocity at the chunk's COM
-  com_compute();
+  // Make sure com is up to date
+  if (atom->property_molecule->comstep != update->ntimestep)
+    atom->property_molecule->com_compute();
 
   // lamda = COM position in triclinic lamda coords
   // vstream = COM streaming velocity = Hrate*lamda + Hratelo. Will be the same for each atom in the chunk
@@ -264,7 +225,9 @@ void ComputeTempDeformChunk::compute_vector()
   int *type = atom->type;
   int *mask = atom->mask;
   int nlocal = atom->nlocal;
-  int index;
+  tagint m;
+
+  if (nlocal > nmax) allocate();
 
   int xbox, ybox, zbox;
   imageint *image = atom->image;
@@ -273,13 +236,13 @@ void ComputeTempDeformChunk::compute_vector()
   for (i = 0; i < 6; i++) t[i] = 0.0;
 
   // calculate KE tensor, removing COM streaming velocity
-  for (i = 0; i < nmax; i++) {
+  for (i = 0; i < nlocal; i++) {
     if (mask[i] & groupbit) {
-      index = ichunk[i]-1;
-      if (index < 0) continue;
+      m = molecule[i]-1;
+      if (m < 0) continue;
 
       // Calculate streaming velocity at the chunk's centre of mass 
-      domain->x2lamda(comall[index], lamda);
+      domain->x2lamda(com[m], lamda);
       vstream_chunk[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
       vstream_chunk[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
       vstream_chunk[2] = h_rate[2] * lamda[2] + h_ratelo[2];
@@ -304,13 +267,13 @@ void ComputeTempDeformChunk::compute_vector()
 
   // Tally up the chunk COM velocities to get the kinetic temperature
   // No need for MPI reductions, since every processor knows the chunk VCMs
-  for (i = 0; i < nchunk; i++) {
-      t[0] += masstotal[i] * vcmall[i][0] * vcmall[i][0];
-      t[1] += masstotal[i] * vcmall[i][1] * vcmall[i][1];
-      t[2] += masstotal[i] * vcmall[i][2] * vcmall[i][2];
-      t[3] += masstotal[i] * vcmall[i][0] * vcmall[i][1];
-      t[4] += masstotal[i] * vcmall[i][0] * vcmall[i][2];
-      t[5] += masstotal[i] * vcmall[i][1] * vcmall[i][2];
+  for (m = 0; m < nmolecule; m++) {
+      t[0] += molmass[m] * vcmall[m][0] * vcmall[m][0];
+      t[1] += molmass[m] * vcmall[m][1] * vcmall[m][1];
+      t[2] += molmass[m] * vcmall[m][2] * vcmall[m][2];
+      t[3] += molmass[m] * vcmall[m][0] * vcmall[m][1];
+      t[4] += molmass[m] * vcmall[m][0] * vcmall[m][2];
+      t[5] += molmass[m] * vcmall[m][1] * vcmall[m][2];
   }
   // final KE
   for (i = 0; i < 6; i++) vector[i] = t[i]*force->mvv2e;
@@ -323,9 +286,14 @@ void ComputeTempDeformChunk::compute_vector()
 
 void ComputeTempDeformChunk::dof_compute()
 {
-  nchunk = cchunk->setup_chunks();
+  // TODO: This will be incorrect for rigid molecules, since we only care about
+  //       CoM momentum
   adjust_dof_fix();
-  dof = domain->dimension * nchunk;
+
+  // TODO: nmolecule is currently the max. molecule index, but some indices
+  //       could be skipped which would make this incorrect
+  dof = domain->dimension * atom->property_molecule->nmolecule;
+
   // This will vary on the type of constraint
   // e.g. if they're bond constraints then they're irrelevant to
   // the molecular temperature
@@ -337,76 +305,6 @@ void ComputeTempDeformChunk::dof_compute()
 }
 
 /* ----------------------------------------------------------------------
-   calculate COM for each chunk
-------------------------------------------------------------------------- */
-
-void ComputeTempDeformChunk::com_compute()
-{
-  int index;
-  double massone;
-  double unwrap[3];
-
-  comstep = update->ntimestep;
-
-  // compute chunk/atom assigns atoms to chunk IDs
-  // extract ichunk index vector from compute
-  // ichunk = 1 to Nchunk for included atoms, 0 for excluded atoms
-
-  nchunk = cchunk->setup_chunks();
-  cchunk->compute_ichunk();
-  int *ichunk = cchunk->ichunk;
-
-  if (nchunk > maxchunk) allocate();
-  size_array_rows = nchunk;
-
-  // zero local per-chunk values
-
-  for (int i = 0; i < nchunk; i++){
-    com[i][0] = com[i][1] = com[i][2] = 0.0;
-    massproc[i] = 0.0;
-  }
-
-  // compute COM and VCM for each chunk
-
-  double **x = atom->x;
-  double **v = atom->v;
-  int *mask = atom->mask;
-  int *type = atom->type;
-  imageint *image = atom->image;
-
-  double *mass = atom->mass;
-  double *rmass = atom->rmass;
-  int nlocal = atom->nlocal;
-
-  for (int i = 0; i < nlocal; i++)
-    if (mask[i] & groupbit) {
-      index = ichunk[i]-1;
-      if (index < 0) continue;
-      if (rmass) massone = rmass[i];
-      else massone = mass[type[i]];
-      
-      // Have to compute COM in unwrapped coordinates
-      domain->unmap(x[i],image[i],unwrap);
-      com[index][0] += unwrap[0] * massone;
-      com[index][1] += unwrap[1] * massone;
-      com[index][2] += unwrap[2] * massone;
-      massproc[index] += massone;
-    }
-
-  MPI_Allreduce(&com[0][0],&comall[0][0],3*nchunk,MPI_DOUBLE,MPI_SUM,world);
-  MPI_Allreduce(massproc,masstotal,nchunk,MPI_DOUBLE,MPI_SUM,world);
-
-  for (int i = 0; i < nchunk; i++) {
-    if (masstotal[i] > 0.0) {
-      comall[i][0] /= masstotal[i];
-      comall[i][1] /= masstotal[i];
-      comall[i][2] /= masstotal[i];
-    } else {
-      comall[i][0] = comall[i][1] = comall[i][2] = 0.0;
-    }
-  }
-}
-/* ----------------------------------------------------------------------
    calculate thermal centre-of-mass velocity (lab-frame minus streaming) 
    for each chunk.
    PRE: com_compute() must have completed
@@ -414,28 +312,25 @@ void ComputeTempDeformChunk::com_compute()
 
 void ComputeTempDeformChunk::vcm_thermal_compute()
 {
-  int index;
+  tagint m;
   double massone;
   double unwrap[3];
 
-  // compute chunk/atom assigns atoms to chunk IDs
-  // extract ichunk index vector from compute
-  // ichunk = 1 to Nchunk for included atoms, 0 for excluded atoms
+  // molid = 1 to nmolecule for included atoms, 0 for excluded atoms
+  tagint *molecule = atom->molecule;
+  tagint nmolecule = atom->property_molecule->nmolecule;
+  double *molmass = atom->property_molecule->mass;
 
-  nchunk = cchunk->setup_chunks();
-  cchunk->compute_ichunk();
-  int *ichunk = cchunk->ichunk;
+  // if (nchunk > maxchunk) allocate();
+  // Reallocation handled by fix property/molecule
+  size_array_rows = nmolecule;
 
-  if (nchunk > maxchunk) allocate();
-  size_array_rows = nchunk;
-
-  // zero local per-chunk values
-
-  for (int i = 0; i < nchunk; i++){
-    vcm[i][0] = vcm[i][1] = vcm[i][2] = 0.0;
+  // zero local per-molecule values
+  for (m = 0; m < nmolecule; m++){
+    vcm[m][0] = vcm[m][1] = vcm[m][2] = 0.0;
   }
 
-  // compute COM and VCM for each chunk
+  // compute VCM for each molecule
 
   double **x = atom->x;
   double **v = atom->v;
@@ -451,30 +346,26 @@ void ComputeTempDeformChunk::vcm_thermal_compute()
 
   for (int i = 0; i < nlocal; i++)
     if (mask[i] & groupbit) {
-      index = ichunk[i]-1;
-      if (index < 0) continue;
+      m = molecule[i]-1;
+      if (m < 0) continue;
       if (rmass) massone = rmass[i];
       else massone = mass[type[i]];
-      vcm[index][0] += vthermal[i][0] * massone;
-      vcm[index][1] += vthermal[i][1] * massone;
-      vcm[index][2] += vthermal[i][2] * massone;
+      vcm[m][0] += vthermal[i][0] * massone;
+      vcm[m][1] += vthermal[i][1] * massone;
+      vcm[m][2] += vthermal[i][2] * massone;
     }
 
-  MPI_Allreduce(&vcm[0][0],&vcmall[0][0],3*nchunk,MPI_DOUBLE,MPI_SUM,world);
-  for (int i = 0; i < nchunk; i++) {
-    if (masstotal[i] > 0.0) {
-      vcmall[i][0] /= masstotal[i];
-      vcmall[i][1] /= masstotal[i];
-      vcmall[i][2] /= masstotal[i];
+  MPI_Allreduce(&vcm[0][0],&vcmall[0][0],3*nmolecule,MPI_DOUBLE,MPI_SUM,world);
+  for (m = 0; m < nmolecule; m++) {
+    if (molmass[m] > 0.0) {
+      vcmall[m][0] /= molmass[m];
+      vcmall[m][1] /= molmass[m];
+      vcmall[m][2] /= molmass[m];
     } else {
-      vcmall[i][0] = vcmall[i][1] = vcmall[i][2] = 0.0;
+      vcmall[m][0] = vcmall[m][1] = vcmall[m][2] = 0.0;
     }
   } 
 }
-
-/* ----------------------------------------------------------------------
-   bias methods: called by thermostats
-------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
    remove velocity bias from atom I to leave thermal velocity
@@ -487,11 +378,12 @@ void ComputeTempDeformChunk::remove_bias(int i, double *v)
   double *h_ratelo = domain->h_ratelo;
   int xbox, ybox, zbox;
   imageint *image = atom->image;
+  double **com = atom->property_molecule->com;
 
-  int index = cchunk->ichunk[i]-1;
-  if (index < 0) return;
+  tagint m = atom->molecule[i]-1;
+  if (m < 0) return;
 
-  domain->x2lamda(comall[index], lamda);
+  domain->x2lamda(com[m], lamda);
   vstream_chunk[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
   vstream_chunk[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
   vstream_chunk[2] = h_rate[2] * lamda[2] + h_ratelo[2];
@@ -532,8 +424,9 @@ void ComputeTempDeformChunk::remove_bias_all()
     memory->create(vbiasall, maxbias, 3, "temp/deform:vbiasall");
   }
 
-  int index;
-  int *ichunk = cchunk->ichunk;
+  tagint m;
+  tagint *molecule = atom->molecule;
+  double **com = atom->property_molecule->com;
 
   double **v = atom->v;
   int *mask = atom->mask;
@@ -541,9 +434,9 @@ void ComputeTempDeformChunk::remove_bias_all()
 
   for (int i = 0; i < nlocal; i++)
     if (mask[i] & groupbit) {
-      index = ichunk[i]-1;
-      if (index < 0) continue;
-      domain->x2lamda(comall[index], lamda);
+      m = molecule[i]-1;
+      if (m < 0) continue;
+      domain->x2lamda(com[m], lamda);
       vstream_chunk[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
       vstream_chunk[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
       vstream_chunk[2] = h_rate[2] * lamda[2] + h_ratelo[2];
@@ -579,8 +472,8 @@ void ComputeTempDeformChunk::restore_bias(int i, double *v)
   double *h_rate = domain->h_rate;
   double *h_ratelo = domain->h_ratelo;
 
-  int index = cchunk->ichunk[i]-1;
-  if (index < 0) return;
+  tagint m = atom->molecule[i]-1;
+  if (m < 0) return;
 
   v[0] += vbias[0];
   v[1] += vbias[1];
@@ -598,8 +491,8 @@ void ComputeTempDeformChunk::restore_bias_all()
   double *h_rate = domain->h_rate;
   double *h_ratelo = domain->h_ratelo;
 
-  int index;
-  int *ichunk = cchunk->ichunk;
+  tagint m;
+  tagint *molecule = atom->molecule;
 
   double **v = atom->v;
   int *mask = atom->mask;
@@ -607,8 +500,8 @@ void ComputeTempDeformChunk::restore_bias_all()
 
   for (int i = 0; i < nlocal; i++)
     if (mask[i] & groupbit) {
-      index = ichunk[i]-1;
-      if (index < 0) continue;
+      m = molecule[i]-1;
+      if (m < 0) continue;
  
       v[i][0] += vbiasall[i][0];
       v[i][1] += vbiasall[i][1];
@@ -616,61 +509,6 @@ void ComputeTempDeformChunk::restore_bias_all()
     }
 }
 
-/* ----------------------------------------------------------------------
-   lock methods: called by fix ave/time
-   these methods insure vector/array size is locked for Nfreq epoch
-     by passing lock info along to compute chunk/atom
-------------------------------------------------------------------------- */
-
-/* ----------------------------------------------------------------------
-   increment lock counter
-------------------------------------------------------------------------- */
-
-void ComputeTempDeformChunk::lock_enable()
-{
-  cchunk->lockcount++;
-}
-
-/* ----------------------------------------------------------------------
-   decrement lock counter in compute chunk/atom, it if still exists
-------------------------------------------------------------------------- */
-
-void ComputeTempDeformChunk::lock_disable()
-{
-  int icompute = modify->find_compute(idchunk);
-  if (icompute >= 0) {
-    cchunk = dynamic_cast<ComputeChunkAtom *>( modify->compute[icompute]);
-    cchunk->lockcount--;
-  }
-}
-
-/* ----------------------------------------------------------------------
-   calculate and return # of chunks = length of vector/array
-------------------------------------------------------------------------- */
-
-int ComputeTempDeformChunk::lock_length()
-{
-  nchunk = cchunk->setup_chunks();
-  return nchunk;
-}
-
-/* ----------------------------------------------------------------------
-   set the lock from startstep to stopstep
-------------------------------------------------------------------------- */
-
-void ComputeTempDeformChunk::lock(Fix *fixptr, bigint startstep, bigint stopstep)
-{
-  cchunk->lock(fixptr,startstep,stopstep);
-}
-
-/* ----------------------------------------------------------------------
-   unset the lock
-------------------------------------------------------------------------- */
-
-void ComputeTempDeformChunk::unlock(Fix *fixptr)
-{
-  cchunk->unlock(fixptr);
-}
 
 /* ----------------------------------------------------------------------
    free and reallocate per-chunk arrays
@@ -678,33 +516,8 @@ void ComputeTempDeformChunk::unlock(Fix *fixptr)
 
 void ComputeTempDeformChunk::allocate()
 {
-  memory->destroy(vthermal);
-  memory->destroy(sum);
-  memory->destroy(sumall);
-  memory->destroy(count);
-  memory->destroy(countall);
-  memory->destroy(array);
-  memory->destroy(vcm);
-  memory->destroy(vcmall);
-  memory->destroy(com);
-  memory->destroy(comall);
-  memory->destroy(massproc);
-  memory->destroy(masstotal);
-  maxchunk = nchunk;
   nmax = atom->nlocal;
-  memory->create(vthermal,nmax,3,"temp/deform/chunk:vcmall");
-  memory->create(sum,maxchunk,"temp/deform/chunk:sum");
-  memory->create(sumall,maxchunk,"temp/deform/chunk:sumall");
-  memory->create(count,maxchunk,"temp/deform/chunk:count");
-  memory->create(countall,maxchunk,"temp/deform/chunk:countall");
-  memory->create(array,maxchunk,nvalues,"temp/chunk:array");
-  memory->create(vcm,maxchunk,3,"temp/deform/chunk:vcm");
-  memory->create(vcmall,maxchunk,3,"temp/deform/chunk:vcmall");
-  memory->create(com,maxchunk,3,"temp/deform/chunk:com");
-  memory->create(comall,maxchunk,3,"temp/deform/chunk:comall");
-  memory->create(massproc,maxchunk,"temp/deform/chunk:massproc");
-  memory->create(masstotal,maxchunk,"temp/deform/chunk:masstotal");
-
+  memory->grow(vthermal,nmax,3,"temp/deform/chunk:vthermal");
 }
 
 /* ----------------------------------------------------------------------
@@ -713,8 +526,10 @@ void ComputeTempDeformChunk::allocate()
 
 double ComputeTempDeformChunk::memory_usage()
 {
-  double bytes = (bigint) maxchunk * 3 * sizeof(double);
-  bytes *= 12;
+  double bytes = (bigint) nmax * 3 * sizeof(double);
+  // vcm and vcmall not allocated if property_molecule is nullptr
+  if (atom->property_molecule != nullptr)
+    bytes += (bigint) atom->property_molecule->nmolecule * 6 * sizeof(double);
   
   return bytes;
 }

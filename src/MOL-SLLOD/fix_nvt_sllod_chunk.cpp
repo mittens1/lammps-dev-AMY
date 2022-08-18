@@ -17,6 +17,7 @@
 ------------------------------------------------------------------------- */
 
 #include "fix_nvt_sllod_chunk.h"
+#include "fix_property_molecule.h"
 
 #include "atom.h"
 #include "compute.h"
@@ -48,7 +49,31 @@ FixNVTSllodChunk::FixNVTSllodChunk(LAMMPS *lmp, int narg, char **arg) :
 
   // default values
 
-  if (mtchain_default_flag) mtchain = 1;
+  if (mtchain_default_flag) {
+    mtchain = 1;
+
+    // Fix allocation of chain thermostats so that size_vector is correct
+    int ich;
+    delete[] eta;
+    delete[] eta_dot;
+    delete[] eta_dotdot;
+    delete[] eta_mass;
+    eta = new double[mtchain];
+
+    // add one extra dummy thermostat, set to zero
+
+    eta_dot = new double[mtchain+1];
+    eta_dot[mtchain] = 0.0;
+    eta_dotdot = new double[mtchain];
+    for (ich = 0; ich < mtchain; ich++) {
+      eta[ich] = eta_dot[ich] = eta_dotdot[ich] = 0.0;
+    }
+    eta_mass = new double[mtchain];
+
+    // Default mtchain in fix_nh is 3.
+    size_vector -= 2*2*(3-mtchain);
+  }
+
 
   kickflag = 0;
 
@@ -62,30 +87,26 @@ FixNVTSllodChunk::FixNVTSllodChunk(LAMMPS *lmp, int narg, char **arg) :
       } else if (strcmp(arg[iarg], "no")==0) {
         kickflag = 0;
       } else error->all(FLERR,"Invalid fix nvt/sllod/chunk command");
-      ++iarg;
     }
+    ++iarg;
   }
 
   // create a new compute temp style
   // id = fix-ID + temp
 
   id_temp = utils::strdup(std::string(id) + "_temp");
-  modify->add_compute(fmt::format("{} {} temp/deform",
+  modify->add_compute(fmt::format("{} {} temp/deform/chunk",
                                   id_temp,group->names[igroup]));
   tcomputeflag = 1;
-  maxchunk = 0;
   vcm = nullptr;
   vcmall = nullptr;
-  masstotal = nullptr;
-  massproc = nullptr;
 }
 
 /* ---------------------------------------------------------------------- */
 FixNVTSllodChunk::~FixNVTSllodChunk() {
-  memory->destroy(vcm);
-  memory->destroy(vcmall);
-  memory->destroy(massproc);
-  memory->destroy(masstotal);
+  // property_molecule may have already been destroyed
+  if (atom->property_molecule != nullptr)
+    atom->property_molecule->destroy_permolecule(&vcmall);   // Also destroys vcm
 }
 
 /* ---------------------------------------------------------------------- */
@@ -111,38 +132,31 @@ void FixNVTSllodChunk::init() {
     }
   if (i == modify->nfix)
     error->all(FLERR,"Using fix nvt/sllod/chunk with no fix deform defined");
+
+  if (atom->property_molecule == nullptr)
+    error->all(FLERR, "fix nvt/sllod/chunk requires a fix property/molecule to be defined with the com option");
+
+  // TODO: maybe just register with fix property/molecule that we need COM to avoid this?
+  if (!atom->property_molecule->com_flag)
+    error->all(FLERR, "fix nvt/sllod/chunk requires a fix property/molecule to be defined with the com option");
+
+  // Set up handling of vcm memory
+  atom->property_molecule->register_permolecule("nvt/sllod/chunk:vcmall", &vcmall, Atom::DOUBLE, 3);
+  atom->property_molecule->register_permolecule("nvt/sllod/chunk:vcm", &vcm, Atom::DOUBLE, 3);
   
-  // Chunk compute
-  if(idchunk == nullptr)
-    error->all(FLERR,"fix nvt/sllod/chunk does not use chunk/atom compute");
-  int icompute = modify->find_compute(idchunk);
-  if (icompute < 0)
-    error->all(FLERR,"Chunk/atom compute does not exist for "
-               "fix nvt/sllod/chunk");
-  cchunk = dynamic_cast<ComputeChunkAtom *>( modify->compute[icompute]);
-  if (strcmp(cchunk->style,"chunk/atom") != 0)
-    error->all(FLERR,"fix nvt/sllod/chunk does not use chunk/atom compute");
-
-  // Chunk VCM compute
-  if(idchunk == nullptr)
-    error->all(FLERR,"fix nvt/sllod/chunk does not use vcm/chunk compute");
-  icompute = modify->find_compute(idvcm);
-  if (icompute < 0)
-    error->all(FLERR,"vcm/chunk compute does not exist for "
-               "fix nvt/sllod/chunk");
-  cvcm = dynamic_cast<ComputeVCMChunk *>( modify->compute[icompute]);
-  if (strcmp(cvcm->style,"vcm/chunk") != 0)
-    error->all(FLERR," does not use vcm/chunk compute");
-
 }
 
 void FixNVTSllodChunk::setup(int vflag) {
   FixNH::setup(vflag);
 
+  // Check for fix property/molecule
+  if (atom->property_molecule == nullptr)
+    error->all(FLERR,"fix nvt/sllod/chunk requires a fix property/molecule to be defined");
+
   // Apply kick if necessary
   if (kickflag) {
     // Call remove_bias first to calculate biases
-    temperature->compute_scalar();
+    // temperature->compute_scalar(); // compute_scalar already called in FixNH::setup()
     temperature->remove_bias_all();
 
     // Restore twice to apply streaming profile
@@ -172,20 +186,14 @@ void FixNVTSllodChunk::nh_v_temp() {
   // Remove bias from all atoms at once to avoid re-calculating the COM positions
   temperature->remove_bias_all();
 
-  // Use molecular/chunk centre-of-mass velocity when calculating SLLOD correction
+  // Use molecular centre-of-mass velocity when calculating SLLOD correction
   vcm_thermal_compute();
-  nchunk = cchunk->setup_chunks();
-  cchunk->compute_ichunk();
-  int *ichunk = cchunk->ichunk;
-  int index;
+  tagint *molecule = atom->molecule;
+  int m;
 
 
   double **v = atom->v;
   int *mask = atom->mask;
-  int *type = atom->type;
-  double *mass = atom->mass;
-  double *rmass = atom->rmass;
-  double massone;
   int nlocal = atom->nlocal;
   if (igroup == atom->firstgroup) nlocal = atom->nfirst;
 
@@ -194,15 +202,15 @@ void FixNVTSllodChunk::nh_v_temp() {
 
   for (int i = 0; i < nlocal; i++) {
     if (mask[i] & groupbit) {
-      index = ichunk[i]-1;
-      if (index < 0) continue;
+      m = molecule[i]-1;
+      if (m < 0) continue;  // TODO: treat single atoms as their own molecule?
       // NOTE: This uses the thermal velocity of the chunk centre-of-mass in all cases
-      vdelu[0] = h_two[0]*vcmall[index][0] + h_two[5]*vcmall[index][1] + h_two[4]*vcmall[index][2];
-      vdelu[1] = h_two[1]*vcmall[index][1] + h_two[3]*vcmall[index][2];
-      vdelu[2] = h_two[2]*vcmall[index][2];
-      v[i][0] = v[i][0] - vcmall[index][0] + vcmall[index][0]*factor_eta - dthalf*vdelu[0];
-      v[i][1] = v[i][1] - vcmall[index][1] + vcmall[index][1]*factor_eta - dthalf*vdelu[1];
-      v[i][2] = v[i][2] - vcmall[index][2] + vcmall[index][2]*factor_eta - dthalf*vdelu[2];
+      vdelu[0] = h_two[0]*vcmall[m][0] + h_two[5]*vcmall[m][1] + h_two[4]*vcmall[m][2];
+      vdelu[1] = h_two[1]*vcmall[m][1] + h_two[3]*vcmall[m][2];
+      vdelu[2] = h_two[2]*vcmall[m][2];
+      v[i][0] = v[i][0] - vcmall[m][0] + vcmall[m][0]*factor_eta - dthalf*vdelu[0];
+      v[i][1] = v[i][1] - vcmall[m][1] + vcmall[m][1]*factor_eta - dthalf*vdelu[1];
+      v[i][2] = v[i][2] - vcmall[m][2] + vcmall[m][2]*factor_eta - dthalf*vdelu[2];
     }
   }
   temperature->restore_bias_all();
@@ -213,33 +221,23 @@ void FixNVTSllodChunk::nh_v_temp() {
  *      COM positions should already be computed when removing biases
  */
 void FixNVTSllodChunk::vcm_thermal_compute() {
-  int index;
+  int m;
   double massone;
 
   // compute chunk/atom assigns atoms to chunk IDs
   // extract ichunk index vector from compute
   // ichunk = 1 to Nchunk for included atoms, 0 for excluded atoms
-  nchunk = cchunk->setup_chunks();
-  cchunk->compute_ichunk();
-  int *ichunk = cchunk->ichunk;
+  // nchunk = cchunk->setup_chunks();
+  // cchunk->compute_ichunk();
+  // int *ichunk = cchunk->ichunk;
+  tagint *molecule = atom->molecule;
+  tagint nmolecule = atom->property_molecule->nmolecule;
 
-  if (nchunk > maxchunk) {
-    maxchunk = nchunk;
-    memory->destroy(vcm);
-    memory->destroy(vcmall);
-    memory->destroy(massproc);
-    memory->destroy(masstotal);
-    memory->create(vcm,maxchunk,3,"nvt/sllod/chunk:vcm");
-    memory->create(vcmall,maxchunk,3,"nvt/sllod/chunk:vcmall");
-    memory->create(massproc,maxchunk,"nvt/sllod/chunk:massproc");
-    memory->create(masstotal,maxchunk,"nvt/sllod/chunk:masstotal");
-  }
 
   // zero local per-chunk values
 
-  for (int i = 0; i < nchunk; i++){
+  for (int i = 0; i < nmolecule; i++){
     vcm[i][0] = vcm[i][1] = vcm[i][2] = 0.0;
-    massproc[i] = 0.0;
   }
 
   // compute COM and VCM for each chunk
@@ -254,34 +252,33 @@ void FixNVTSllodChunk::vcm_thermal_compute() {
 
   double *mass = atom->mass;
   double *rmass = atom->rmass;
+  double *molmass = atom->property_molecule->mass;
   int nlocal = atom->nlocal;
 
   for (int i = 0; i < nlocal; i++)
     if (mask[i] & groupbit) {
-      index = ichunk[i]-1;
-      if (index < 0) continue;
+      m = molecule[i]-1;
+      if (m < 0) continue;
       if (rmass) {
         massone = rmass[i];
       } else {
         massone = mass[type[i]];
       }
       // Adjust the velocity to reflect the thermal velocity 
-      vcm[index][0] += v[i][0] * massone;
-      vcm[index][1] += v[i][1] * massone;
-      vcm[index][2] += v[i][2] * massone;
-      massproc[index] += massone;
+      vcm[m][0] += v[i][0] * massone;
+      vcm[m][1] += v[i][1] * massone;
+      vcm[m][2] += v[i][2] * massone;
     }
 
-  MPI_Allreduce(&vcm[0][0],&vcmall[0][0],3*nchunk,MPI_DOUBLE,MPI_SUM,world);
-  MPI_Allreduce(massproc,masstotal,nchunk,MPI_DOUBLE,MPI_SUM,world);
+  MPI_Allreduce(&vcm[0][0],&vcmall[0][0],3*nmolecule,MPI_DOUBLE,MPI_SUM,world);
 
-  for (int i = 0; i < nchunk; i++) {
-    if (masstotal[i] > 0.0) {
-      vcmall[i][0] /= masstotal[i];
-      vcmall[i][1] /= masstotal[i];
-      vcmall[i][2] /= masstotal[i];
+  for (int m = 0; m < nmolecule; m++) {
+    if (molmass[m] > 0.0) {
+      vcmall[m][0] /= molmass[m];
+      vcmall[m][1] /= molmass[m];
+      vcmall[m][2] /= molmass[m];
     } else {
-      vcmall[i][0] = vcmall[i][1] = vcmall[i][2] = 0.0;
+      vcmall[m][0] = vcmall[m][1] = vcmall[m][2] = 0.0;
     }
   }
 }

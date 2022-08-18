@@ -40,8 +40,6 @@ class ComputePressureChunk : public Compute {
   double *kspace_virial;
   Compute *temperature;
   char *id_temp;
-  char* idchunk;
-  class ComputeChunkAtom* cchunk;
   double virial[9];    // ordering: xx,yy,zz,xy,xz,yz,yx,zx,zy
   int pairhybridflag;
   class Pair *pairhybrid;

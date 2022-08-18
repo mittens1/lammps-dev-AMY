@@ -16,6 +16,7 @@
 ------------------------------------------------------------------------- */
 
 #include "pair_lj_cut_chunk.h"
+#include "fix_property_molecule.h"
 
 #include "atom.h"
 #include "comm.h"
@@ -39,7 +40,7 @@ using namespace MathConst;
 
 /* ---------------------------------------------------------------------- */
 
-PairLJCutChunk::PairLJCutChunk(LAMMPS *lmp) : Pair(lmp), chunk_ID(nullptr)
+PairLJCutChunk::PairLJCutChunk(LAMMPS *lmp) : Pair(lmp), molids(nullptr)
 {
   respa_enable = 1;
   born_matrix_enable = 1;
@@ -66,7 +67,7 @@ PairLJCutChunk::~PairLJCutChunk()
     memory->destroy(lj3);
     memory->destroy(lj4);
     memory->destroy(offset);
-    memory->destroy(chunk_ID);
+    memory->destroy(molids);
   }
 }
 
@@ -78,27 +79,10 @@ void PairLJCutChunk::compute(int eflag, int vflag)
   double xtmp, ytmp, ztmp, delx, dely, delz, evdwl, fpair;
   double rsq, r2inv, r6inv, forcelj, factor_lj;
   int *ilist, *jlist, *numneigh, **firstneigh;
-  
-  /****************** EVK DEBUG ******************/
-  idchunk = utils::strdup("molchunk");
-  idcom = utils::strdup("molcom");
 
-  int icompute = modify->find_compute(idchunk);
-  if (icompute < 0)
-    error->all(FLERR,"Chunk/atom compute does not exist for "
-               "pair lj/cut/coul/cut/chunk");
-  cchunk = dynamic_cast<ComputeChunkAtom *>( modify->compute[icompute]);
-  if (strcmp(cchunk->style,"chunk/atom") != 0)
-    error->all(FLERR,"pair lj/cut/coul/cut/chunk does not use chunk/atom compute");
-
-  icompute = modify->find_compute(idcom);
-  if (icompute < 0)
-    error->all(FLERR,"Chunk/atom compute does not exist for "
-               "pair lj/cut/coul/cut/chunk");
-  ccom = dynamic_cast<ComputeCOMChunk *>( modify->compute[icompute]);
-  if (strcmp(cchunk->style,"chunk/atom") != 0)
-    error->all(FLERR,"pair lj/cut/coul/cut/chunk does not use chunk/atom compute");
-  /****************** EVK DEBUG ******************/
+  if (atom->property_molecule == nullptr ||
+      !atom->property_molecule->com_flag)
+    error->all(FLERR, "pair lj/cut/chunk requires a fix property/molecule to be defined with the com option");
 
   evdwl = 0.0;
   ev_init(eflag, vflag);
@@ -111,7 +95,7 @@ void PairLJCutChunk::compute(int eflag, int vflag)
   int newton_pair = force->newton_pair;
 
   int index_i, index_j;
-  double **com;
+  double **com = atom->property_molecule->com;
   double delcomx, delcomy, delcomz;
 
   inum = list->inum;
@@ -120,22 +104,18 @@ void PairLJCutChunk::compute(int eflag, int vflag)
   firstneigh = list->firstneigh;
 
   if (atom->nmax > nmax) {
-    memory->destroy(chunk_ID);
+    memory->destroy(molids);
     nmax = atom->nmax;
-    memory->create(chunk_ID, nmax, "pair/lj/cut/coul/cut/chunk:chunk_ID");
+    memory->create(molids, nmax, "pair/lj/cut/coul/cut/chunk:molids");
   }
-  nchunk = cchunk->setup_chunks();
-  cchunk->compute_ichunk();
+  tagint nmolecule = atom->property_molecule->nmolecule;
+  tagint *molecule = atom->molecule;
   for (ii = 0; ii < inum; ii++) {
     i = ilist[ii];
-    chunk_ID[ii] = cchunk->ichunk[ii];
+    molids[i] = molecule[i];
   } 
 
   comm->forward_comm(this);
-  
-  // Centre of mass for virial compute
-  ccom->compute_array();
-  com = ccom->array;
   
   // loop over neighbors of my atoms
 
@@ -148,14 +128,14 @@ void PairLJCutChunk::compute(int eflag, int vflag)
     jlist = firstneigh[i];
     jnum = numneigh[i];
     
-    index_i = chunk_ID[i] - 1;
+    index_i = molids[i] - 1;
     if (index_i < 0) continue;
     for (jj = 0; jj < jnum; jj++) {
       j = jlist[jj];
       factor_lj = special_lj[sbmask(j)];
       j &= NEIGHMASK;
 
-      index_j = chunk_ID[j] - 1;
+      index_j = molids[j] - 1;
       if (index_j < 0) continue;
       delcomx = com[index_i][0] - com[index_j][0];
       delcomy = com[index_i][1] - com[index_j][1];
@@ -209,7 +189,7 @@ int PairLJCutChunk::pack_forward_comm(int n, int *list, double *buf, int /*pbc_f
   m = 0;
   for (i = 0; i < n; i++) {
     j = list[i];
-    buf[m++] = chunk_ID[j];
+    buf[m++] = molids[j];
   }
   
   return m;
@@ -224,7 +204,7 @@ void PairLJCutChunk::unpack_forward_comm(int n, int first, double *buf)
   m = 0;
   last = first + n;
   for (i = first; i < last; i++) {
-    chunk_ID[i] = buf[m++];
+    molids[i] = buf[m++];
   }
   
 }

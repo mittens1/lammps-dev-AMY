@@ -67,6 +67,7 @@ Compute::Compute(LAMMPS *lmp, int narg, char **arg) :
 
   tempflag = pressflag = peflag = 0;
   pressatomflag = peatomflag = 0;
+  pressmoleculeflag = 0;
   create_attribute = 0;
   tempbias = 0;
 

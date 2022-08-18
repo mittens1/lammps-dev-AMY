@@ -56,12 +56,8 @@ class PairLJCutChunk : public Pair {
   double **lj1, **lj2, **lj3, **lj4, **offset;
   double *cut_respa;
   
-  int nchunk, maxchunk, nmax;
-  char* idchunk;
-  char* idcom;
-  class ComputeChunkAtom *cchunk;
-  class ComputeCOMChunk *ccom;
-  int* chunk_ID; // Deliberately not calling this ichunk to avoid confusing it with the compute's attribute
+  int nmax;
+  tagint* molids; // Deliberately not calling this ichunk to avoid confusing it with the compute's attribute
   virtual void allocate();
 };
 

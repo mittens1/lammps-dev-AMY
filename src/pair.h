@@ -294,8 +294,9 @@ class Pair : protected Pointers {
 
 /**************** EVK DEBUG *********************/
  public:
-  double chunk_virial[9];             // Accumulated molecular virial
-  int vflag_chunk;
+  double molecule_virial[9];             // Accumulated molecular virial
+  int vflag_molecule;
+  class ComputePropertyMolecule *molprop;
 
 };
 

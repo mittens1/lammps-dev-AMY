@@ -34,16 +34,16 @@ class FixNVTSllodChunk : public FixNH {
 
  private:
   int nondeformbias;
-  int nchunk, maxchunk;
+  // int nchunk, maxchunk;
   int kickflag;           // Whether to apply the streaming profile on init
   double **vcm, **vcmall;
-  double *massproc, *masstotal;
+  // double *massproc, *masstotal;
 
   void nh_v_temp() override;
   void vcm_thermal_compute();
 
-  class ComputeChunkAtom *cchunk;
-  class ComputeVCMChunk *cvcm;
+  // class ComputeChunkAtom *cchunk;
+  // class ComputeVCMChunk *cvcm;
 };
 
 }    // namespace LAMMPS_NS

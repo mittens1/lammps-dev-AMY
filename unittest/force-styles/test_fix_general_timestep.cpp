@@ -222,7 +222,7 @@ void generate_yaml_file(const char *outfile, const TestConfig &config)
 
 TEST(FixGeneralTimestep, plain)
 {
-    if (!LAMMPS::is_installed_pkg("MOLECULE")) GTEST_SKIP();
+    if (!LAMMPS::is_installed_pkg("MOL-SLLOD")) GTEST_SKIP();
     if (test_config.skip_tests.count(test_info_->name())) GTEST_SKIP();
 #if defined(USING_STATIC_LIBS)
     if (test_config.skip_tests.count("static")) GTEST_SKIP();

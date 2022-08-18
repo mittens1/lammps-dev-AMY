@@ -549,6 +549,7 @@ TEST_F(SimpleCommandsTest, CiteMe)
 
 int main(int argc, char **argv)
 {
+    {
     MPI_Init(&argc, &argv);
     ::testing::InitGoogleMock(&argc, argv);
 
@@ -567,8 +568,16 @@ int main(int argc, char **argv)
     }
 
     if ((argc > 1) && (strcmp(argv[1], "-v") == 0)) verbose = true;
+    }
 
-    int rv = RUN_ALL_TESTS();
-    MPI_Finalize();
+    int rv;
+    {
+        rv = RUN_ALL_TESTS();
+    }
+    fprintf(stderr,"HERE\n");
+    {
+        MPI_Finalize();
+    }
+    fprintf(stderr,"MPI_FINALIZE\n");
     return rv;
 }
