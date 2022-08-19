@@ -6,17 +6,16 @@ epsilon: 3e-12
 skip_tests:
 prerequisites: ! |
   atom full
-  fix nvt/sllod/chunk
-  pair lj/cut/chunk
+  fix nvt/sllod/mol
 pre_commands: ! ""
 post_commands: ! "neigh_modify delay 4\n
    fix def all deform 1 xy erate 1.0 remap v\n
-   compute shear_temp all temp/deform/chunk\n
-   fix test all nvt/sllod/chunk temp 1.0 1.0 $(50.0*dt) tchain 1 kick no\n
+   compute shear_temp all temp/deform/mol\n
+   fix test all nvt/sllod/mol temp 1.0 1.0 $(50.0*dt) tchain 1 kick no\n
    fix_modify test temp shear_temp\n
    fix molprop all property/molecule com\n
-   compute molpress all pressure/chunk shear_temp virial\n"
-input_file: in.sllod-chunk-monoatoms
+   compute molpress all pressure/mol shear_temp virial\n"
+input_file: in.mol-sllod-monoatoms
 natoms: 1792
 global_scalar: 1104.435078655527
 global_vector: ! |-
