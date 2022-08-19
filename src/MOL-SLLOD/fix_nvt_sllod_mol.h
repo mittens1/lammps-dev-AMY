@@ -13,21 +13,21 @@
 
 #ifdef FIX_CLASS
 // clang-format off
-FixStyle(nvt/sllod/chunk,FixNVTSllodChunk);
+FixStyle(nvt/sllod/chunk,FixNVTSllodMol);
 // clang-format on
 #else
 
-#ifndef LMP_FIX_NVT_SLLOD_CHUNK_H
-#define LMP_FIX_NVT_SLLOD_CHUNK_H
+#ifndef LMP_FIX_NVT_SLLOD_MOL_H
+#define LMP_FIX_NVT_SLLOD_MOL_H
 
 #include "fix_nh.h"
 
 namespace LAMMPS_NS {
 
-class FixNVTSllodChunk : public FixNH {
+class FixNVTSllodMol : public FixNH {
  public:
-  FixNVTSllodChunk(class LAMMPS *, int, char **);
-  ~FixNVTSllodChunk();
+  FixNVTSllodMol(class LAMMPS *, int, char **);
+  ~FixNVTSllodMol();
 
   void init() override;
   void setup(int) override;

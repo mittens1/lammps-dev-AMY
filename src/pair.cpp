@@ -22,8 +22,6 @@
 #include "atom_masks.h"
 #include "comm.h"
 #include "compute.h"
-#include "compute_chunk_atom.h"
-#include "compute_com_chunk.h"
 #include "domain.h"
 #include "error.h"
 #include "fix_property_molecule.h"
@@ -1520,7 +1518,7 @@ void Pair::ev_tally_tip4p(int key, int *list, double *v,
 /* ----------------------------------------------------------------------
    tally molecular virials into global accumulator
    have delx, dely, delz and fpair (which gives fx, fy, fz)
-   get delcomx, delcomy, delcomz (chunk centre-of-mass separation)
+   get delcomx, delcomy, delcomz (molecule centre-of-mass separation)
    from atom->property_molecule
 ------------------------------------------------------------------------- */
 
@@ -1529,7 +1527,7 @@ void Pair::vmol_tally(int i, int j, int nlocal, int newton_pair,
 {
   if (atom->property_molecule == nullptr ||
       !atom->property_molecule->com_flag)
-    error->all(FLERR, "pair lj/cut/chunk requires a fix property/molecule to be defined with the com option");
+    error->all(FLERR, "calculation of the molecular virial requires a fix property/molecule to be defined with the com option");
 
   double delcom[3], v[9];
   double **com = atom->property_molecule->com;
@@ -1595,7 +1593,7 @@ void Pair::vmol_tally(int i, int j, int nlocal, int newton_pair,
 /* ----------------------------------------------------------------------
    tally molecular virials into global accumulator
    have fx, fy, fz
-   get delcomx, delcomy, delcomz (chunk centre-of-mass separation)
+   get delcomx, delcomy, delcomz (molecule centre-of-mass separation)
    from mols_com
 ------------------------------------------------------------------------- */
 
@@ -1663,65 +1661,6 @@ void Pair::vmol_tally_xyz(int i, int j, int nlocal, int newton_pair,
     }
   }
 }
-/* ----------------------------------------------------------------------
-   tally eng_vdwl and virial into global or per-atom accumulators
-   for chunk/molecular virial, have delx,dely,delz and fx,fy,fz
-   called when using full neighbor lists
-------------------------------------------------------------------------- */
-/*
-void Pair::ev_tally_chunk_full(int i, double evdwl, double ecoul,
-                               double fx, double fy, double fz,
-                               double delx, double dely, double delz,
-                               double delcomx, double delcomy, double delcomz)
-{
-  double evdwlhalf,ecoulhalf,epairhalf,v[6];
-
-  if (eflag_either) {
-    if (eflag_global) {
-      evdwlhalf = 0.5*evdwl;
-      ecoulhalf = 0.5*ecoul;
-      eng_vdwl += evdwlhalf;
-      eng_coul += ecoulhalf;
-    }
-    if (eflag_atom) {
-      epairhalf = 0.5 * (evdwl + ecoul);
-      eatom[i] += epairhalf;
-    }
-  }
-
-  // Calculate the projection of the atomic separation onto the vector
-  // connecting the chunk centre-of-mass positions
-  double scaling = (delx*delcomx + dely*delcomy + delz*delcomz)/
-                   (delx*delx + dely*dely + delz*delz);
-
-  if (vflag_either) {
-    v[0] = 0.5*delx*fx/scaling;
-    v[1] = 0.5*dely*fy/scaling;
-    v[2] = 0.5*delz*fz/scaling;
-    v[3] = 0.5*delx*fy/scaling;
-    v[4] = 0.5*delx*fz/scaling;
-    v[5] = 0.5*dely*fz/scaling;
-
-    if (vflag_global) {
-      virial[0] += v[0];
-      virial[1] += v[1];
-      virial[2] += v[2];
-      virial[3] += v[3];
-      virial[4] += v[4];
-      virial[5] += v[5];
-    }
-
-    if (vflag_atom) {
-      vatom[i][0] += v[0];
-      vatom[i][1] += v[1];
-      vatom[i][2] += v[2];
-      vatom[i][3] += v[3];
-      vatom[i][4] += v[4];
-      vatom[i][5] += v[5];
-    }
-  }
-}
-*/
 
 /* ----------------------------------------------------------------------
    tally virial into global or per-atom accumulators

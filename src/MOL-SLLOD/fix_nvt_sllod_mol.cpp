@@ -16,17 +16,14 @@
    Contributing author: Emily Kahl (Uni of QLD)
 ------------------------------------------------------------------------- */
 
-#include "fix_nvt_sllod_chunk.h"
-#include "fix_property_molecule.h"
+#include "fix_nvt_sllod_mol.h"
 
 #include "atom.h"
 #include "compute.h"
-#include "compute_chunk_atom.h"
-#include "compute_com_chunk.h"
-#include "compute_vcm_chunk.h"
 #include "domain.h"
 #include "error.h"
 #include "fix_deform.h"
+#include "fix_property_molecule.h"
 #include "group.h"
 #include "math_extra.h"
 #include "modify.h"
@@ -39,13 +36,13 @@ using namespace FixConst;
 
 /* ---------------------------------------------------------------------- */
 
-FixNVTSllodChunk::FixNVTSllodChunk(LAMMPS *lmp, int narg, char **arg) :
+FixNVTSllodMol::FixNVTSllodMol(LAMMPS *lmp, int narg, char **arg) :
   FixNH(lmp, narg, arg)
 {
   if (!tstat_flag)
-    error->all(FLERR,"Temperature control must be used with fix nvt/sllod/chunk");
+    error->all(FLERR,"Temperature control must be used with fix nvt/sllod/mol");
   if (pstat_flag)
-    error->all(FLERR,"Pressure control can not be used with fix nvt/sllod/chunk");
+    error->all(FLERR,"Pressure control can not be used with fix nvt/sllod/mol");
 
   // default values
 
@@ -81,12 +78,12 @@ FixNVTSllodChunk::FixNVTSllodChunk(LAMMPS *lmp, int narg, char **arg) :
 
   while (iarg < narg) {
     if (strcmp(arg[iarg++], "kick")==0) {
-      if (iarg >= narg) error->all(FLERR,"Invalid fix nvt/sllod/chunk command");
+      if (iarg >= narg) error->all(FLERR,"Invalid fix nvt/sllod/mol command");
       if (strcmp(arg[iarg], "yes")==0) {
         kickflag = 1;
       } else if (strcmp(arg[iarg], "no")==0) {
         kickflag = 0;
-      } else error->all(FLERR,"Invalid fix nvt/sllod/chunk command");
+      } else error->all(FLERR,"Invalid fix nvt/sllod/mol command");
     }
     ++iarg;
   }
@@ -95,7 +92,7 @@ FixNVTSllodChunk::FixNVTSllodChunk(LAMMPS *lmp, int narg, char **arg) :
   // id = fix-ID + temp
 
   id_temp = utils::strdup(std::string(id) + "_temp");
-  modify->add_compute(fmt::format("{} {} temp/deform/chunk",
+  modify->add_compute(fmt::format("{} {} temp/deform/mol",
                                   id_temp,group->names[igroup]));
   tcomputeflag = 1;
   vcm = nullptr;
@@ -103,7 +100,7 @@ FixNVTSllodChunk::FixNVTSllodChunk(LAMMPS *lmp, int narg, char **arg) :
 }
 
 /* ---------------------------------------------------------------------- */
-FixNVTSllodChunk::~FixNVTSllodChunk() {
+FixNVTSllodMol::~FixNVTSllodMol() {
   // property_molecule may have already been destroyed
   if (atom->property_molecule != nullptr)
     atom->property_molecule->destroy_permolecule(&vcmall);   // Also destroys vcm
@@ -111,14 +108,14 @@ FixNVTSllodChunk::~FixNVTSllodChunk() {
 
 /* ---------------------------------------------------------------------- */
 
-void FixNVTSllodChunk::init() {
+void FixNVTSllodMol::init() {
   FixNH::init();
 
   if (!temperature->tempbias)
-    error->all(FLERR,"Temperature for fix nvt/sllod/chunk does not have a bias");
+    error->all(FLERR,"Temperature for fix nvt/sllod/mol does not have a bias");
 
   nondeformbias = 0;
-  if (strcmp(temperature->style,"temp/deform/chunk") != 0) nondeformbias = 1;
+  if (strcmp(temperature->style,"temp/deform/mol") != 0) nondeformbias = 1;
 
   // check fix deform remap settings
 
@@ -126,32 +123,32 @@ void FixNVTSllodChunk::init() {
   for (i = 0; i < modify->nfix; i++)
     if (strncmp(modify->fix[i]->style,"deform",6) == 0) {
       if ((dynamic_cast<FixDeform *>( modify->fix[i]))->remapflag != Domain::V_REMAP)
-        error->all(FLERR,"Using fix nvt/sllod/chunk with inconsistent fix deform "
+        error->all(FLERR,"Using fix nvt/sllod/mol with inconsistent fix deform "
                    "remap option");
       break;
     }
   if (i == modify->nfix)
-    error->all(FLERR,"Using fix nvt/sllod/chunk with no fix deform defined");
+    error->all(FLERR,"Using fix nvt/sllod/mol with no fix deform defined");
 
   if (atom->property_molecule == nullptr)
-    error->all(FLERR, "fix nvt/sllod/chunk requires a fix property/molecule to be defined with the com option");
+    error->all(FLERR, "fix nvt/sllod/mol requires a fix property/molecule to be defined with the com option");
 
   // TODO: maybe just register with fix property/molecule that we need COM to avoid this?
   if (!atom->property_molecule->com_flag)
-    error->all(FLERR, "fix nvt/sllod/chunk requires a fix property/molecule to be defined with the com option");
+    error->all(FLERR, "fix nvt/sllod/mol requires a fix property/molecule to be defined with the com option");
 
   // Set up handling of vcm memory
-  atom->property_molecule->register_permolecule("nvt/sllod/chunk:vcmall", &vcmall, Atom::DOUBLE, 3);
-  atom->property_molecule->register_permolecule("nvt/sllod/chunk:vcm", &vcm, Atom::DOUBLE, 3);
+  atom->property_molecule->register_permolecule("nvt/sllod/mol:vcmall", &vcmall, Atom::DOUBLE, 3);
+  atom->property_molecule->register_permolecule("nvt/sllod/mol:vcm", &vcm, Atom::DOUBLE, 3);
   
 }
 
-void FixNVTSllodChunk::setup(int vflag) {
+void FixNVTSllodMol::setup(int vflag) {
   FixNH::setup(vflag);
 
   // Check for fix property/molecule
   if (atom->property_molecule == nullptr)
-    error->all(FLERR,"fix nvt/sllod/chunk requires a fix property/molecule to be defined");
+    error->all(FLERR,"fix nvt/sllod/mol requires a fix property/molecule to be defined");
 
   // Apply kick if necessary
   if (kickflag) {
@@ -173,7 +170,7 @@ void FixNVTSllodChunk::setup(int vflag) {
    perform half-step scaling of velocities
 -----------------------------------------------------------------------*/
 
-void FixNVTSllodChunk::nh_v_temp() {
+void FixNVTSllodMol::nh_v_temp() {
   // remove and restore bias = streaming velocity = Hrate*lamda + Hratelo
   // thermostat thermal velocity only
   // vdelu = SLLOD correction = Hrate*Hinv*vthermal
@@ -204,7 +201,7 @@ void FixNVTSllodChunk::nh_v_temp() {
     if (mask[i] & groupbit) {
       m = molecule[i]-1;
       if (m < 0) continue;  // TODO: treat single atoms as their own molecule?
-      // NOTE: This uses the thermal velocity of the chunk centre-of-mass in all cases
+      // NOTE: This uses the thermal velocity of the molecule centre-of-mass in all cases
       vdelu[0] = h_two[0]*vcmall[m][0] + h_two[5]*vcmall[m][1] + h_two[4]*vcmall[m][2];
       vdelu[1] = h_two[1]*vcmall[m][1] + h_two[3]*vcmall[m][2];
       vdelu[2] = h_two[2]*vcmall[m][2];
@@ -220,27 +217,21 @@ void FixNVTSllodChunk::nh_v_temp() {
  * Pre: atom velocities should have streaming bias removed
  *      COM positions should already be computed when removing biases
  */
-void FixNVTSllodChunk::vcm_thermal_compute() {
+void FixNVTSllodMol::vcm_thermal_compute() {
   int m;
   double massone;
 
-  // compute chunk/atom assigns atoms to chunk IDs
-  // extract ichunk index vector from compute
-  // ichunk = 1 to Nchunk for included atoms, 0 for excluded atoms
-  // nchunk = cchunk->setup_chunks();
-  // cchunk->compute_ichunk();
-  // int *ichunk = cchunk->ichunk;
   tagint *molecule = atom->molecule;
   tagint nmolecule = atom->property_molecule->nmolecule;
 
 
-  // zero local per-chunk values
+  // zero local per-molecule values
 
   for (int i = 0; i < nmolecule; i++){
     vcm[i][0] = vcm[i][1] = vcm[i][2] = 0.0;
   }
 
-  // compute COM and VCM for each chunk
+  // compute VCM for each molecule
 
   double **v = atom->v;
   int *mask = atom->mask;

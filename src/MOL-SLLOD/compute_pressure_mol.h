@@ -13,43 +13,44 @@
 
 #ifdef COMPUTE_CLASS
 // clang-format off
-ComputeStyle(temp/deform/chunk,ComputeTempDeformChunk);
+ComputeStyle(pressure/mol,ComputePressureMol);
 // clang-format on
 #else
 
-#ifndef LMP_COMPUTE_TEMP_DEFORM_CHUNK_H
-#define LMP_COMPUTE_TEMP_DEFORM_CHUNK_H
+#ifndef LMP_COMPUTE_PRESSURE_MOL_H
+#define LMP_COMPUTE_PRESSURE_MOL_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputeTempDeformChunk : public Compute {
+class ComputePressureMol : public Compute {
  public:
-  ComputeTempDeformChunk(class LAMMPS *, int, char **);
-  ~ComputeTempDeformChunk() override;
+  ComputePressureMol(class LAMMPS *, int, char **);
+  virtual ~ComputePressureMol() override;
   void init() override;
-  void setup() override;
   double compute_scalar() override;
   void compute_vector() override;
+  void reset_extra_compute_fix(const char *) override;
 
-  void remove_bias(int, double *) override;
-  void remove_bias_all() override;
-  void restore_bias(int, double *) override;
-  void restore_bias_all() override;
+ protected:
+  double boltz, nktv2p, inv_volume;
+  int nvirial, dimension;
+  double **vptr;
+  double *kspace_virial;
+  Compute *temperature;
+  char *id_temp;
+  double virial[9];    // ordering: xx,yy,zz,xy,xz,yz,yx,zx,zy
+  int pairhybridflag;
+  class Pair *pairhybrid;
+  int keflag, pairflag, bondflag, angleflag, dihedralflag, improperflag;
+  int fixflag, kspaceflag;
 
-  double memory_usage() override;
+  void virial_compute(int, int);
 
  private:
-  int nmax;
-  double adof, cdof, tfactor;
-
-  double **vcm, **vcmall;
-  double **&vthermal = array;
-
-  void vcm_thermal_compute();
-  void dof_compute();
-  void allocate();
+  char *pstyle;
+  int nsub;
 };
 
 }    // namespace LAMMPS_NS

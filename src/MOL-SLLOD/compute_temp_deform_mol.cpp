@@ -16,16 +16,15 @@
    Contributing author: Emily Kahl, Stephen Sanderson, Shern Tee (Uni of QLD)
 ------------------------------------------------------------------------- */
 
-#include "compute_temp_deform_chunk.h"
-#include "fix_property_molecule.h"
+#include "compute_temp_deform_mol.h"
 
 #include "atom.h"
 #include "comm.h"
-#include "compute_chunk_atom.h"
 #include "domain.h"
 #include "error.h"
 #include "fix.h"
 #include "fix_deform.h"
+#include "fix_property_molecule.h"
 #include "force.h"
 #include "memory.h"
 #include "modify.h"
@@ -37,10 +36,10 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-ComputeTempDeformChunk::ComputeTempDeformChunk(LAMMPS *lmp, int narg, char **arg) :
+ComputeTempDeformMol::ComputeTempDeformMol(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg), vcm(nullptr), vcmall(nullptr)
 {
-  if (narg != 3) error->all(FLERR,"Illegal compute temp/chunk/deform command");
+  if (narg != 3) error->all(FLERR,"Illegal compute temp/deform/mol command");
 
   scalar_flag = vector_flag = 1;
   size_vector = 9;
@@ -66,13 +65,13 @@ ComputeTempDeformChunk::ComputeTempDeformChunk(LAMMPS *lmp, int narg, char **arg
   size_array_rows_variable = 1;
   extarray = 0;
 
-  // chunk-based data
+  // per-atom allocation
   nmax = 0;
 }
 
 /* ---------------------------------------------------------------------- */
 
-ComputeTempDeformChunk::~ComputeTempDeformChunk()
+ComputeTempDeformMol::~ComputeTempDeformMol()
 {
   delete [] vector;
   memory->destroy(vbiasall);
@@ -85,14 +84,14 @@ ComputeTempDeformChunk::~ComputeTempDeformChunk()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeTempDeformChunk::init()
+void ComputeTempDeformMol::init()
 {
   if (atom->property_molecule == nullptr || 
       !atom->property_molecule->com_flag)
-    error->all(FLERR, "compute temp/deform/chunk requires a fix property/molecule to be defined with the com option");
+    error->all(FLERR, "compute temp/deform/mol requires a fix property/molecule to be defined with the com option");
 
-  atom->property_molecule->register_permolecule("temp/deform/chunk:vcmall", &vcmall, Atom::DOUBLE, 3);
-  atom->property_molecule->register_permolecule("temp/deform/chunk:vcm", &vcm, Atom::DOUBLE, 3);
+  atom->property_molecule->register_permolecule("temp/deform/mol:vcmall", &vcmall, Atom::DOUBLE, 3);
+  atom->property_molecule->register_permolecule("temp/deform/mol:vcm", &vcm, Atom::DOUBLE, 3);
 
   auto fixes = modify->get_fix_by_style("^deform");
   if (fixes.size() > 0) {
@@ -102,18 +101,18 @@ void ComputeTempDeformChunk::init()
     error->warning(FLERR, "Using compute temp/deform with no fix deform defined");
 }
 
-void ComputeTempDeformChunk::setup()
+void ComputeTempDeformMol::setup()
 {
   // Make sure fix property/molecule exists
   if (atom->property_molecule == nullptr || 
       !atom->property_molecule->com_flag)
-    error->all(FLERR, "compute temp/deform/chunk requires a fix property/molecule to be defined with the com option");
+    error->all(FLERR, "compute temp/deform/mol requires a fix property/molecule to be defined with the com option");
 }
 
 
 /* ---------------------------------------------------------------------- */
 
-double ComputeTempDeformChunk::compute_scalar()
+double ComputeTempDeformMol::compute_scalar()
 {
   int i;
   invoked_scalar = update->ntimestep;
@@ -128,9 +127,10 @@ double ComputeTempDeformChunk::compute_scalar()
   double *molmass = atom->property_molecule->mass;
  
   // lamda = COM position in triclinic lamda coords
-  // vstream = COM streaming velocity = Hrate*lamda + Hratelo. Will be the same for each atom in the chunk
+  // vstream = COM streaming velocity = Hrate*lamda + Hratelo. Will be the same
+  //           for each atom in the molecule
   // vthermal = thermal velocity = v - vstream
-  double lamda[3], vstream_chunk[3], vstream_atom[3];
+  double lamda[3], vstream_mol[3], vstream_atom[3];
 
   double *h_rate = domain->h_rate;
   double *h_ratelo = domain->h_ratelo;
@@ -157,11 +157,11 @@ double ComputeTempDeformChunk::compute_scalar()
       m = molecule[i]-1;
       if (m < 0) continue;
 
-      // Calculate streaming velocity at the chunk's centre of mass 
+      // Calculate streaming velocity at the molecule's centre of mass 
       domain->x2lamda(com[m], lamda);
-      vstream_chunk[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
-      vstream_chunk[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
-      vstream_chunk[2] = h_rate[2] * lamda[2] + h_ratelo[2];
+      vstream_mol[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
+      vstream_mol[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
+      vstream_mol[2] = h_rate[2] * lamda[2] + h_ratelo[2];
 
       // Now calculate the atomic streaming velocity at the unwrapped coordinates
       xbox = (image[i] & IMGMASK) - IMGMAX;
@@ -173,15 +173,15 @@ double ComputeTempDeformChunk::compute_scalar()
 
       // Calculate the thermal velocity of the atom in its unwrapped position. Need to 
       // add the new atomic streaming velocity, but subtract the COM streaming velocity
-      vthermal[i][0] = v[i][0] + vstream_atom[0] - vstream_chunk[0];
-      vthermal[i][1] = v[i][1] + vstream_atom[1] - vstream_chunk[1];
-      vthermal[i][2] = v[i][2] + vstream_atom[2] - vstream_chunk[2];
+      vthermal[i][0] = v[i][0] + vstream_atom[0] - vstream_mol[0];
+      vthermal[i][1] = v[i][1] + vstream_atom[1] - vstream_mol[1];
+      vthermal[i][2] = v[i][2] + vstream_atom[2] - vstream_mol[2];
     }
   }
-  // Calculate the thermal velocity (total minus streaming) of all chunks
+  // Calculate the thermal velocity (total minus streaming) of all molecules
   vcm_thermal_compute();
 
-  // Tally up the chunk COM velocities to get the kinetic temperature
+  // Tally up the molecule COM velocities to get the kinetic temperature
   for (m = 0; m < nmolecule; m++) {
     t += (vcmall[m][0]*vcmall[m][0] + vcmall[m][1]*vcmall[m][1] + vcmall[m][2]*vcmall[m][2]) * 
           molmass[m];
@@ -197,7 +197,7 @@ double ComputeTempDeformChunk::compute_scalar()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeTempDeformChunk::compute_vector()
+void ComputeTempDeformMol::compute_vector()
 {
   int i;
 
@@ -213,8 +213,9 @@ void ComputeTempDeformChunk::compute_vector()
     atom->property_molecule->com_compute();
 
   // lamda = COM position in triclinic lamda coords
-  // vstream = COM streaming velocity = Hrate*lamda + Hratelo. Will be the same for each atom in the chunk
-  double lamda[3], vstream_chunk[3], vstream_atom[3];
+  // vstream = COM streaming velocity = Hrate*lamda + Hratelo. Will be the same
+  //           for each atom in the molecule
+  double lamda[3], vstream_mol[3], vstream_atom[3];
 
   double *h_rate = domain->h_rate;
   double *h_ratelo = domain->h_ratelo;
@@ -241,11 +242,11 @@ void ComputeTempDeformChunk::compute_vector()
       m = molecule[i]-1;
       if (m < 0) continue;
 
-      // Calculate streaming velocity at the chunk's centre of mass 
+      // Calculate streaming velocity at the molecule's centre of mass 
       domain->x2lamda(com[m], lamda);
-      vstream_chunk[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
-      vstream_chunk[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
-      vstream_chunk[2] = h_rate[2] * lamda[2] + h_ratelo[2];
+      vstream_mol[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
+      vstream_mol[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
+      vstream_mol[2] = h_rate[2] * lamda[2] + h_ratelo[2];
 
       // Now calculate the atomic streaming velocity at the unwrapped coordinates
       xbox = (image[i] & IMGMASK) - IMGMAX;
@@ -257,16 +258,16 @@ void ComputeTempDeformChunk::compute_vector()
 
       // Calculate the thermal velocity of the atom in its unwrapped position. Need to 
       // add the new atomic streaming velocity, but subtract the COM streaming velocity
-      vthermal[i][0] = v[i][0] + vstream_atom[0] - vstream_chunk[0];
-      vthermal[i][1] = v[i][1] + vstream_atom[1] - vstream_chunk[1];
-      vthermal[i][2] = v[i][2] + vstream_atom[2] - vstream_chunk[2];
+      vthermal[i][0] = v[i][0] + vstream_atom[0] - vstream_mol[0];
+      vthermal[i][1] = v[i][1] + vstream_atom[1] - vstream_mol[1];
+      vthermal[i][2] = v[i][2] + vstream_atom[2] - vstream_mol[2];
     }
   }
-  // Calculate the thermal velocity (total minus streaming) of all chunks
+  // Calculate the thermal velocity (total minus streaming) of all molecules
   vcm_thermal_compute();
 
-  // Tally up the chunk COM velocities to get the kinetic temperature
-  // No need for MPI reductions, since every processor knows the chunk VCMs
+  // Tally up the molecule COM velocities to get the kinetic temperature
+  // No need for MPI reductions, since every processor knows the molecule VCMs
   for (m = 0; m < nmolecule; m++) {
       t[0] += molmass[m] * vcmall[m][0] * vcmall[m][0];
       t[1] += molmass[m] * vcmall[m][1] * vcmall[m][1];
@@ -281,10 +282,10 @@ void ComputeTempDeformChunk::compute_vector()
 
 
 /* ----------------------------------------------------------------------
-   Degrees of freedom for chunk temperature
+   Degrees of freedom for molecular temperature
 ------------------------------------------------------------------------- */
 
-void ComputeTempDeformChunk::dof_compute()
+void ComputeTempDeformMol::dof_compute()
 {
   // TODO: This will be incorrect for rigid molecules, since we only care about
   //       CoM momentum
@@ -306,11 +307,11 @@ void ComputeTempDeformChunk::dof_compute()
 
 /* ----------------------------------------------------------------------
    calculate thermal centre-of-mass velocity (lab-frame minus streaming) 
-   for each chunk.
+   for each molecule.
    PRE: com_compute() must have completed
   --------------------------------------------------------------------*/
 
-void ComputeTempDeformChunk::vcm_thermal_compute()
+void ComputeTempDeformMol::vcm_thermal_compute()
 {
   tagint m;
   double massone;
@@ -321,8 +322,8 @@ void ComputeTempDeformChunk::vcm_thermal_compute()
   tagint nmolecule = atom->property_molecule->nmolecule;
   double *molmass = atom->property_molecule->mass;
 
-  // if (nchunk > maxchunk) allocate();
-  // Reallocation handled by fix property/molecule
+  // Reallocation handled by fix property/molecule.
+  // Make sure size is up to date
   size_array_rows = nmolecule;
 
   // zero local per-molecule values
@@ -371,9 +372,9 @@ void ComputeTempDeformChunk::vcm_thermal_compute()
    remove velocity bias from atom I to leave thermal velocity
 ------------------------------------------------------------------------- */
 
-void ComputeTempDeformChunk::remove_bias(int i, double *v)
+void ComputeTempDeformMol::remove_bias(int i, double *v)
 {
-  double lamda[3], vstream_chunk[3], vstream_atom[3];
+  double lamda[3], vstream_mol[3], vstream_atom[3];
   double *h_rate = domain->h_rate;
   double *h_ratelo = domain->h_ratelo;
   int xbox, ybox, zbox;
@@ -384,9 +385,9 @@ void ComputeTempDeformChunk::remove_bias(int i, double *v)
   if (m < 0) return;
 
   domain->x2lamda(com[m], lamda);
-  vstream_chunk[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
-  vstream_chunk[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
-  vstream_chunk[2] = h_rate[2] * lamda[2] + h_ratelo[2];
+  vstream_mol[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
+  vstream_mol[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
+  vstream_mol[2] = h_rate[2] * lamda[2] + h_ratelo[2];
 
   // Now calculate the atomic streaming velocity at the unwrapped coordinates
   xbox = (image[i] & IMGMASK) - IMGMAX;
@@ -398,9 +399,9 @@ void ComputeTempDeformChunk::remove_bias(int i, double *v)
 
   // Calculate the thermal velocity of the atom in its unwrapped position. Need to 
   // add the new atomic streaming velocity, but subtract the COM streaming velocity
-  vbias[0] = vstream_chunk[0] - vstream_atom[0];
-  vbias[1] = vstream_chunk[1] - vstream_atom[1];
-  vbias[2] = vstream_chunk[2] - vstream_atom[2];
+  vbias[0] = vstream_mol[0] - vstream_atom[0];
+  vbias[1] = vstream_mol[1] - vstream_atom[1];
+  vbias[2] = vstream_mol[2] - vstream_atom[2];
   v[0] = v[0] - vbias[0];
   v[1] = v[1] - vbias[1];
   v[2] = v[2] - vbias[2];
@@ -410,9 +411,9 @@ void ComputeTempDeformChunk::remove_bias(int i, double *v)
    remove velocity bias from all atoms to leave thermal velocity
 ------------------------------------------------------------------------- */
 
-void ComputeTempDeformChunk::remove_bias_all()
+void ComputeTempDeformMol::remove_bias_all()
 {
-  double lamda[3], vstream_chunk[3], vstream_atom[3];
+  double lamda[3], vstream_mol[3], vstream_atom[3];
   double *h_rate = domain->h_rate;
   double *h_ratelo = domain->h_ratelo;
   int xbox, ybox, zbox;
@@ -437,9 +438,9 @@ void ComputeTempDeformChunk::remove_bias_all()
       m = molecule[i]-1;
       if (m < 0) continue;
       domain->x2lamda(com[m], lamda);
-      vstream_chunk[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
-      vstream_chunk[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
-      vstream_chunk[2] = h_rate[2] * lamda[2] + h_ratelo[2];
+      vstream_mol[0] = h_rate[0] * lamda[0] + h_rate[5] * lamda[1] + h_rate[4] * lamda[2] + h_ratelo[0];
+      vstream_mol[1] = h_rate[1] * lamda[1] + h_rate[3] * lamda[2] + h_ratelo[1];
+      vstream_mol[2] = h_rate[2] * lamda[2] + h_ratelo[2];
 
       // Now calculate the atomic streaming velocity at the unwrapped coordinates
       xbox = (image[i] & IMGMASK) - IMGMAX;
@@ -451,9 +452,9 @@ void ComputeTempDeformChunk::remove_bias_all()
 
       // Calculate the thermal velocity of the atom in its unwrapped position. Need to 
       // add the new atomic streaming velocity, but subtract the COM streaming velocity
-      vbiasall[i][0] = vstream_chunk[0] - vstream_atom[0];
-      vbiasall[i][1] = vstream_chunk[1] - vstream_atom[1];
-      vbiasall[i][2] = vstream_chunk[2] - vstream_atom[2];
+      vbiasall[i][0] = vstream_mol[0] - vstream_atom[0];
+      vbiasall[i][1] = vstream_mol[1] - vstream_atom[1];
+      vbiasall[i][2] = vstream_mol[2] - vstream_atom[2];
     
       v[i][0] -= vbiasall[i][0];
       v[i][1] -= vbiasall[i][1];
@@ -466,7 +467,7 @@ void ComputeTempDeformChunk::remove_bias_all()
    assume remove_bias() was previously called
 ------------------------------------------------------------------------- */
 
-void ComputeTempDeformChunk::restore_bias(int i, double *v)
+void ComputeTempDeformMol::restore_bias(int i, double *v)
 {
   double lamda[3];
   double *h_rate = domain->h_rate;
@@ -485,7 +486,7 @@ void ComputeTempDeformChunk::restore_bias(int i, double *v)
    assume remove_bias_all() was previously called
 ------------------------------------------------------------------------- */
 
-void ComputeTempDeformChunk::restore_bias_all()
+void ComputeTempDeformMol::restore_bias_all()
 {
   double lamda[3], vbias[3];
   double *h_rate = domain->h_rate;
@@ -511,20 +512,20 @@ void ComputeTempDeformChunk::restore_bias_all()
 
 
 /* ----------------------------------------------------------------------
-   free and reallocate per-chunk arrays
+   free and reallocate per-atom data
 ------------------------------------------------------------------------- */
 
-void ComputeTempDeformChunk::allocate()
+void ComputeTempDeformMol::allocate()
 {
   nmax = atom->nlocal;
-  memory->grow(vthermal,nmax,3,"temp/deform/chunk:vthermal");
+  memory->grow(vthermal,nmax,3,"temp/deform/mol:vthermal");
 }
 
 /* ----------------------------------------------------------------------
    memory usage of local data
 ------------------------------------------------------------------------- */
 
-double ComputeTempDeformChunk::memory_usage()
+double ComputeTempDeformMol::memory_usage()
 {
   double bytes = (bigint) nmax * 3 * sizeof(double);
   // vcm and vcmall not allocated if property_molecule is nullptr
