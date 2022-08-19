@@ -36,6 +36,7 @@ class FixPropertyMolecule : public Fix {
   void pre_force(int) override;
   void pre_force_respa(int, int, int) override;
   double memory_usage() override;
+  double compute_array(int, int) override;
 
   struct PerMolecule {
     std::string name;     // Identifier

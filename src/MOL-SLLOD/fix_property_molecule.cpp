@@ -71,6 +71,10 @@ FixPropertyMolecule::FixPropertyMolecule(LAMMPS *lmp, int narg, char **arg) :
     register_permolecule("property/molecule:com", &com, Atom::DOUBLE, 3);
     register_permolecule("property/molecule:comproc", &comproc, Atom::DOUBLE, 3);
   }
+
+  array_flag = 1;
+  size_array_cols = 4;
+  size_array_rows_variable = 1;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -137,6 +141,7 @@ void FixPropertyMolecule::setup_pre_force(int vflag) {
   // Needs to be run before main setup() calls, since those could rely on the
   // memory being allocated (eg. for fix nvt/sllod/molecule with kick yes)
   grow_permolecule();
+  if (com_flag) com_compute();
 }
 
 void FixPropertyMolecule::setup_pre_force_respa(int vflag, int ilevel) {
@@ -174,6 +179,8 @@ void FixPropertyMolecule::grow_permolecule() {
     // Assumes mass is constant.
     if (mass_flag) mass_compute();
   }
+
+  size_array_rows = static_cast<int>(nmolecule);
 }
 
 /* ----------------------------------------------------------------------
@@ -280,6 +287,17 @@ double FixPropertyMolecule::memory_usage()
   return bytes;
 }
 
+/* ----------------------------------------------------------------------
+   basic array output, almost no error checking
+------------------------------------------------------------------------- */
+
+double FixPropertyMolecule::compute_array(int imol, int col)
+{
+  if (imol > static_cast<int>(nmolecule))
+    error->all(FLERR, fmt::format("Cannot request info for molecule {} from fix/property/molecule (nmolecule = {})", imol, nmolecule));
+  if (col == 3) return mass[imol];
+  else return com[imol][col];
+}
 
 /* ----------------------------------------------------------------------
    memory handling for permolecule data

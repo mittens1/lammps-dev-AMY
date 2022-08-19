@@ -972,17 +972,7 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
     }
   }
 
-  if (vflag_mol) {
-    molecule_virial[0] = 0.0;
-    molecule_virial[1] = 0.0;
-    molecule_virial[2] = 0.0;
-    molecule_virial[3] = 0.0;
-    molecule_virial[4] = 0.0;
-    molecule_virial[5] = 0.0;
-    molecule_virial[6] = 0.0;
-    molecule_virial[7] = 0.0;
-    molecule_virial[8] = 0.0;
-  }
+  if (vflag_mol) for (int d = 0; d < 9; d++) molecule_virial[d] = 0.0;
   // run ev_setup option for TALLY computes
 
   if (num_tally_compute > 0) {
@@ -1052,13 +1042,17 @@ void Pair::ev_tally(int i, int j, int nlocal, int newton_pair,
   }
 
   if (vflag_either) {
-    v[0] = delx*delx*fpair;
-    v[1] = dely*dely*fpair;
-    v[2] = delz*delz*fpair;
-    v[3] = delx*dely*fpair;
-    v[4] = delx*delz*fpair;
-    v[5] = dely*delz*fpair;
+    if (vflag_mol) vmol_tally(i, j, nlocal, newton_pair, fpair, delx, dely, delz);
 
+    if (vflag_global || vflag_atom) {
+      v[0] = delx*delx*fpair;
+      v[1] = dely*dely*fpair;
+      v[2] = delz*delz*fpair;
+      v[3] = delx*dely*fpair;
+      v[4] = delx*delz*fpair;
+      v[5] = dely*delz*fpair;
+    }    
+    
     if (vflag_global) {
       if (newton_pair) {
         virial[0] += v[0];
@@ -1106,7 +1100,6 @@ void Pair::ev_tally(int i, int j, int nlocal, int newton_pair,
       }
     }
 
-    if (vflag_mol) vmol_tally(i, j, nlocal, newton_pair, fpair, delx, dely, delz);
   }
 
   if (num_tally_compute > 0) {
