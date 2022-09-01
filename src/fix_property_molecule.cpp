@@ -14,12 +14,9 @@
 #include "fix_property_molecule.h"
 
 #include "atom.h"
-#include "comm.h"
 #include "domain.h"
 #include "error.h"
 #include "memory.h"
-#include "read_data.h"
-#include "tokenizer.h"
 #include "update.h"
 
 #include <cstring>
@@ -27,7 +24,6 @@
 using namespace LAMMPS_NS;
 using namespace FixConst;
 
-enum { MASS, COM}; //, IVEC, DVEC, IARRAY, DARRAY };
 
 /* ---------------------------------------------------------------------- */
 

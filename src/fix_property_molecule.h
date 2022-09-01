@@ -63,13 +63,6 @@ class FixPropertyMolecule : public Fix {
   tagint nmolecule;           // # of molecules
   int com_flag, mass_flag;    // flags for specific fields
 
-  // Maybe store molecular virial here??
-  // double virial_molecule[9];   // global molecular virial
-  // int vflag_global_molecule;
-
-  // TODO: double **vmolecule; // per molecule virial
-  //       int vflag_molecule;
-
   void mass_compute();
   void com_compute();
 

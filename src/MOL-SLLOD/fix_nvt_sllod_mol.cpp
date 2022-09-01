@@ -194,20 +194,21 @@ void FixNVTSllodMol::nh_v_temp() {
   int nlocal = atom->nlocal;
   if (igroup == atom->firstgroup) nlocal = atom->nfirst;
 
-  double h_two[6],vdelu[3];
+  double h_two[6],vdelu[3],*vcom;
   MathExtra::multiply_shape_shape(domain->h_rate,domain->h_inv,h_two);
 
   for (int i = 0; i < nlocal; i++) {
     if (mask[i] & groupbit) {
       m = molecule[i]-1;
-      if (m < 0) continue;  // TODO: treat single atoms as their own molecule?
+      if (m < 0) vcom = v[i];  // CoM velocity of single atom is just v[i]
+      else vcom = vcmall[m];
       // NOTE: This uses the thermal velocity of the molecule centre-of-mass in all cases
-      vdelu[0] = h_two[0]*vcmall[m][0] + h_two[5]*vcmall[m][1] + h_two[4]*vcmall[m][2];
-      vdelu[1] = h_two[1]*vcmall[m][1] + h_two[3]*vcmall[m][2];
-      vdelu[2] = h_two[2]*vcmall[m][2];
-      v[i][0] = v[i][0] - vcmall[m][0] + vcmall[m][0]*factor_eta - dthalf*vdelu[0];
-      v[i][1] = v[i][1] - vcmall[m][1] + vcmall[m][1]*factor_eta - dthalf*vdelu[1];
-      v[i][2] = v[i][2] - vcmall[m][2] + vcmall[m][2]*factor_eta - dthalf*vdelu[2];
+      vdelu[0] = h_two[0]*vcom[0] + h_two[5]*vcom[1] + h_two[4]*vcom[2];
+      vdelu[1] = h_two[1]*vcom[1] + h_two[3]*vcom[2];
+      vdelu[2] = h_two[2]*vcom[2];
+      v[i][0] = v[i][0] - vcom[0] + vcom[0]*factor_eta - dthalf*vdelu[0];
+      v[i][1] = v[i][1] - vcom[1] + vcom[1]*factor_eta - dthalf*vdelu[1];
+      v[i][2] = v[i][2] - vcom[2] + vcom[2]*factor_eta - dthalf*vdelu[2];
     }
   }
   temperature->restore_bias_all();
