@@ -36,7 +36,7 @@ class FixNH : public Fix {
   void write_restart(FILE *) override;
   virtual int pack_restart_data(double *);    // pack restart data
   void restart(char *) override;
-  int modify_param(int, char **) override;
+  virtual int modify_param(int, char **) override;
   void reset_target(double) override;
   void reset_dt() override;
   void *extract(const char *, int &) override;

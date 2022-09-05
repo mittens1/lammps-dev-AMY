@@ -130,30 +130,7 @@ FixNHUef::FixNHUef(LAMMPS *lmp, int narg, char **arg) :
 
   // check for conditions that impose a deviatoric stress
 
-  if (pstyle == TRICLINIC)
-    error->all(FLERR,"Only normal stresses can be controlled with fix/nvt/npt/uef");
-  double erate_tmp[3];
-  erate_tmp[0]=erate[0];
-  erate_tmp[1]=erate[1];
-  erate_tmp[2]=-erate[0]-erate[1];
-
-  if (pstyle == ANISO) {
-    if (!(ext_flags[0] & ext_flags[1] & ext_flags[2]))
-      error->all(FLERR,"The ext keyword may only be used with iso pressure control");
-    for (int k=0;k<3;k++)
-      for (int j=0;j<3;j++)
-        if (p_flag[k] && p_flag[j]) {
-          double tol = 1e-6;
-          if ( !nearly_equal(p_start[k],p_start[j],tol)
-               || !nearly_equal(p_stop[k],p_stop[j],tol))
-            error->all(FLERR,"All controlled stresses must have the same "
-                       "value in fix/nvt/npt/uef");
-          if ( !nearly_equal(erate_tmp[k],erate_tmp[j],tol)
-               || !nearly_equal(erate_tmp[k],erate_tmp[j],tol))
-            error->all(FLERR,"Dimensions with controlled stresses must have"\
-                       " same strain rate in fix/nvt/npt/uef");
-        }
-  }
+  check_deviatoric_stress();
 
   // conditions that produce a deviatoric stress have already been eliminated.
 
@@ -191,6 +168,34 @@ FixNHUef::FixNHUef(LAMMPS *lmp, int narg, char **arg) :
   pcomputeflag = 1;
 
   nevery = 1;
+}
+/* ----------------------------------------------------------------------
+ *  Error on conditions that would create a deviatoric stress
+ * ---------------------------------------------------------------------- */
+void FixNHUef::check_deviatoric_stress() {
+  if (pstyle == TRICLINIC)
+    error->all(FLERR,"Only normal stresses can be controlled with fix/nvt/npt/uef");
+  if (pstyle == ANISO) {
+    double erate_tmp[3];
+    erate_tmp[0]=erate[0];
+    erate_tmp[1]=erate[1];
+    erate_tmp[2]=-erate[0]-erate[1];
+
+    if (!(ext_flags[0] & ext_flags[1] & ext_flags[2]))
+      error->all(FLERR,"The ext keyword may only be used with iso pressure control");
+    for (int k=0;k<3;k++)
+      for (int j=0;j<3;j++)
+        if (p_flag[k] && p_flag[j]) {
+          double tol = 1e-6;
+          if ( !nearly_equal(p_start[k],p_start[j],tol)
+              || !nearly_equal(p_stop[k],p_stop[j],tol))
+            error->all(FLERR,"All controlled stresses must have the same "
+                "value in fix/nvt/npt/uef");
+          if ( !nearly_equal(erate_tmp[k],erate_tmp[j],tol))
+            error->all(FLERR,"Dimensions with controlled stresses must have"\
+                " same strain rate in fix/nvt/npt/uef");
+        }
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -815,4 +820,18 @@ bool FixNHUef::nearly_equal(double a, double b, double epsilon)
     return diff < epsilon*epsilon;
   else
     return diff/(absa+absb) < epsilon;
+}
+
+/* ----------------------------------------------------------------------
+ * Allow change in strain rate
+ * ---------------------------------------------------------------------- */
+int FixNHUef::modify_param(int narg, char **arg) {
+  if (strcmp(arg[0], "erate")==0) {
+      if (narg < 3) error->all(FLERR,"Illegal fix_modify command");
+      erate[0] = utils::numeric(FLERR,arg[1],false,lmp);
+      erate[1] = utils::numeric(FLERR,arg[2],false,lmp);
+      check_deviatoric_stress();
+      return 3;
+  }
+  return FixNH::modify_param(narg, arg);
 }
