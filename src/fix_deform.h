@@ -34,15 +34,19 @@ class FixDeform : public Fix {
   int setmask() override;
   void init() override;
   void pre_exchange() override;
+  void post_integrate() override;
   void end_of_step() override;
   void write_restart(FILE *) override;
   void restart(char *buf) override;
   double memory_usage() override;
 
  protected:
+  void update_box();
+
   int triclinic, scaleflag, flipflag;
   int flip, flipxy, flipxz, flipyz;
   double *h_rate, *h_ratelo;
+  int end_flag;                  // 1 if box update is performed at end of step (INCORRECT DYNAMICS!)
   int varflag;                   // 1 if VARIABLE option is used, 0 if not
   int kspace_flag;               // 1 if KSpace invoked, 0 if not
   std::vector<Fix *> rfix;       // pointers to rigid fixes

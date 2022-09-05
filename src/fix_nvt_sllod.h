@@ -29,9 +29,11 @@ class FixNVTSllod : public FixNH {
   FixNVTSllod(class LAMMPS *, int, char **);
 
   void init() override;
+  void nve_x() override;
 
  private:
   int nondeformbias;
+  int p_sllod, peculiar;
 
   void nh_v_temp() override;
 };

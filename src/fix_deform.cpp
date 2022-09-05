@@ -52,6 +52,7 @@ irregular(nullptr), set(nullptr)
   no_change_box = 1;
   restart_global = 1;
   pre_exchange_migrate = 1;
+  end_flag = 0;
 
   nevery = utils::inumeric(FLERR,arg[3],false,lmp);
   if (nevery <= 0) error->all(FLERR,"Illegal fix deform command");
@@ -382,7 +383,11 @@ int FixDeform::setmask()
 {
   int mask = 0;
   if (force_reneighbor) mask |= PRE_EXCHANGE;
-  mask |= END_OF_STEP;
+  if (end_flag) mask |= END_OF_STEP;
+  else {
+    mask |= POST_INTEGRATE;
+    // mask |= POST_INTEGRATE_RESPA; // TODO: SUPPORT RESPA
+  }
   return mask;
 }
 
@@ -649,7 +654,18 @@ void FixDeform::pre_exchange()
 
 /* ---------------------------------------------------------------------- */
 
-void FixDeform::end_of_step()
+// No need to check end_flag, since mask determines which of these gets called
+void FixDeform::end_of_step() {
+  update_box();
+}
+
+void FixDeform::post_integrate() {
+  update_box();
+}
+
+
+// Update the box
+void FixDeform::update_box()
 {
   int i;
 
@@ -867,7 +883,7 @@ void FixDeform::end_of_step()
 
       flip = 0;
       if (flipxy || flipxz || flipyz) flip = 1;
-      if (flip) next_reneighbor = update->ntimestep + 1;
+      if (flip) next_reneighbor = update->ntimestep + (end_flag ? 1 : 0);
     }
   }
 
@@ -995,6 +1011,10 @@ void FixDeform::options(int narg, char **arg)
     } else if (strcmp(arg[iarg],"flip") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal fix deform command");
       flipflag = utils::logical(FLERR,arg[iarg+1],false,lmp);
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "end_of_step") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal fix deform command");
+      end_flag = utils::logical(FLERR,arg[iarg+1],false,lmp);
       iarg += 2;
     } else error->all(FLERR,"Illegal fix deform command");
   }
