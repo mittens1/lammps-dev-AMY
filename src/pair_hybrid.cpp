@@ -185,6 +185,10 @@ void PairHybrid::compute(int eflag, int vflag)
       }
     }
 
+    if (vflag_mol) {
+      for (n = 0; n < 9; n++) molecule_virial[n] += styles[m]->molecule_virial[n];
+    }
+
   }
 
   delete[] saved_special;

@@ -12,13 +12,12 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "compute_pressure_chunk.h"
+#include "compute_pressure_mol.h"
 
 #include "angle.h"
 #include "atom.h"
 #include "bond.h"
 #include "comm.h"
-#include "compute_chunk_atom.h"
 #include "dihedral.h"
 #include "domain.h"
 #include "error.h"
@@ -37,7 +36,7 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-ComputePressureChunk::ComputePressureChunk(LAMMPS *lmp, int narg, char **arg) :
+ComputePressureMol::ComputePressureMol(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg),
   vptr(nullptr), id_temp(nullptr), pstyle(nullptr)
 {
@@ -50,22 +49,11 @@ ComputePressureChunk::ComputePressureChunk(LAMMPS *lmp, int narg, char **arg) :
   extvector = 0;
   pressflag = 1;
   timeflag = 1;
+  pressmoleculeflag = 1;
 
-  // store temperature ID used by pressure computation
-  // insure it is valid for temperature computation
-  idchunk = strdup(arg[3]);
-  int icompute = modify->find_compute(idchunk);
-  if (icompute < 0)
-    error->all(FLERR,"Chunk/atom compute does not exist for "
-               "compute pressure/chunk");
-  cchunk = dynamic_cast<ComputeChunkAtom *>( modify->compute[icompute]);
-
-  if (strcmp(cchunk->style,"chunk/atom") != 0)
-    error->all(FLERR,"Compute pressure/chunk does not use chunk/atom compute");
-
-  if (strcmp(arg[4],"NULL") == 0) id_temp = nullptr;
+  if (strcmp(arg[3],"NULL") == 0) id_temp = nullptr;
   else {
-    id_temp = utils::strdup(arg[4]);
+    id_temp = utils::strdup(arg[3]);
 
     int icompute = modify->find_compute(id_temp);
     if (icompute < 0)
@@ -78,7 +66,7 @@ ComputePressureChunk::ComputePressureChunk(LAMMPS *lmp, int narg, char **arg) :
   // process optional args
 
   pairhybridflag = 0;
-  if (narg == 5) {
+  if (narg == 4) {
     keflag = 1;
     pairflag = 1;
     bondflag = angleflag = dihedralflag = improperflag = 1;
@@ -88,7 +76,7 @@ ComputePressureChunk::ComputePressureChunk(LAMMPS *lmp, int narg, char **arg) :
     pairflag = 0;
     bondflag = angleflag = dihedralflag = improperflag = 0;
     kspaceflag = fixflag = 0;
-    int iarg = 5;
+    int iarg = 4;
     while (iarg < narg) {
       if (strcmp(arg[iarg],"ke") == 0) keflag = 1;
       else if (strcmp(arg[iarg],"pair/hybrid") == 0) {
@@ -132,7 +120,9 @@ ComputePressureChunk::ComputePressureChunk(LAMMPS *lmp, int narg, char **arg) :
         pairflag = 1;
         bondflag = angleflag = dihedralflag = improperflag = 1;
         kspaceflag = fixflag = 1;
-      } else error->all(FLERR,"Illegal compute pressure command");
+      } 
+      else if (strcmp(arg[iarg],"nomolvirial") == 0) pressmoleculeflag = 0;
+      else error->all(FLERR,"Illegal compute pressure command");
       iarg++;
     }
   }
@@ -150,7 +140,7 @@ ComputePressureChunk::ComputePressureChunk(LAMMPS *lmp, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-ComputePressureChunk::~ComputePressureChunk()
+ComputePressureMol::~ComputePressureMol()
 {
   delete [] id_temp;
   delete [] vector;
@@ -160,7 +150,7 @@ ComputePressureChunk::~ComputePressureChunk()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputePressureChunk::init()
+void ComputePressureMol::init()
 {
   boltz = force->boltz;
   nktv2p = force->nktv2p;
@@ -220,7 +210,7 @@ void ComputePressureChunk::init()
       vptr[nvirial++] = pairhybrid->virial;
     }
     */
-    if (pairflag && force->pair) vptr[nvirial++] = force->pair->chunk_virial;
+    if (pairflag && force->pair) vptr[nvirial++] = force->pair->molecule_virial;
     /*
     if (bondflag && force->bond) vptr[nvirial++] = force->bond->virial;
     if (angleflag && force->angle) vptr[nvirial++] = force->angle->virial;
@@ -245,7 +235,7 @@ void ComputePressureChunk::init()
    compute total pressure, averaged over Pxx, Pyy, Pzz
 ------------------------------------------------------------------------- */
 
-double ComputePressureChunk::compute_scalar()
+double ComputePressureMol::compute_scalar()
 {
   invoked_scalar = update->ntimestep;
   if (update->vflag_global != invoked_scalar)
@@ -284,7 +274,7 @@ double ComputePressureChunk::compute_scalar()
    assume KE tensor has already been computed
 ------------------------------------------------------------------------- */
 
-void ComputePressureChunk::compute_vector()
+void ComputePressureMol::compute_vector()
 {
   invoked_vector = update->ntimestep;
   if (update->vflag_global != invoked_vector)
@@ -315,11 +305,11 @@ void ComputePressureChunk::compute_vector()
 
   if (dimension == 3) {
     inv_volume = 1.0 / (domain->xprd * domain->yprd * domain->zprd);
-    // TODO: overhaul this to use chunks where appropriate
+    // TODO: overhaul this to use molecules where appropriate
     //virial_compute(6,3);
-    double *vchunk = force->pair->chunk_virial;
+    double *vmolecule = force->pair->molecule_virial;
     double v[9];
-    MPI_Allreduce(vchunk,v,9,MPI_DOUBLE,MPI_SUM,world);
+    MPI_Allreduce(vmolecule,v,9,MPI_DOUBLE,MPI_SUM,world);
     if (keflag) {
       for (int i = 0; i < 9; i++)
         vector[i] = (ke_tensor[i] + v[i]) * inv_volume * nktv2p;
@@ -329,9 +319,9 @@ void ComputePressureChunk::compute_vector()
     }
   } else {
     inv_volume = 1.0 / (domain->xprd * domain->yprd);
-    double *vchunk = force->pair->chunk_virial;
+    double *vmolecule = force->pair->molecule_virial;
     double v[9];
-    MPI_Allreduce(vchunk,v,9,MPI_DOUBLE,MPI_SUM,world);
+    MPI_Allreduce(vmolecule,v,9,MPI_DOUBLE,MPI_SUM,world);
 
     if (keflag) {
       for (int i = 0; i < 9; i++)
@@ -345,7 +335,7 @@ void ComputePressureChunk::compute_vector()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputePressureChunk::virial_compute(int n, int ndiag)
+void ComputePressureMol::virial_compute(int n, int ndiag)
 {
   int i,j;
   double v[6],*vcomponent;
@@ -376,7 +366,7 @@ void ComputePressureChunk::virial_compute(int n, int ndiag)
 
 /* ---------------------------------------------------------------------- */
 
-void ComputePressureChunk::reset_extra_compute_fix(const char *id_new)
+void ComputePressureMol::reset_extra_compute_fix(const char *id_new)
 {
   delete [] id_temp;
   id_temp = utils::strdup(id_new);

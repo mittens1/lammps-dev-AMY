@@ -13,37 +13,37 @@
 
 #ifdef FIX_CLASS
 // clang-format off
-FixStyle(nvt/sllod/chunk,FixNVTSllodChunk);
+FixStyle(nvt/sllod/mol,FixNVTSllodMol);
 // clang-format on
 #else
 
-#ifndef LMP_FIX_NVT_SLLOD_CHUNK_H
-#define LMP_FIX_NVT_SLLOD_CHUNK_H
+#ifndef LMP_FIX_NVT_SLLOD_MOL_H
+#define LMP_FIX_NVT_SLLOD_MOL_H
 
 #include "fix_nh.h"
 
 namespace LAMMPS_NS {
 
-class FixNVTSllodChunk : public FixNH {
+class FixNVTSllodMol : public FixNH {
  public:
-  FixNVTSllodChunk(class LAMMPS *, int, char **);
-  ~FixNVTSllodChunk();
+  FixNVTSllodMol(class LAMMPS *, int, char **);
+  ~FixNVTSllodMol();
 
   void init() override;
   void setup(int) override;
 
  private:
   int nondeformbias;
-  int nchunk, maxchunk;
+  // int nchunk, maxchunk;
   int kickflag;           // Whether to apply the streaming profile on init
   double **vcm, **vcmall;
-  double *massproc, *masstotal;
+  // double *massproc, *masstotal;
 
   void nh_v_temp() override;
   void vcm_thermal_compute();
 
-  class ComputeChunkAtom *cchunk;
-  class ComputeVCMChunk *cvcm;
+  // class ComputeChunkAtom *cchunk;
+  // class ComputeVCMChunk *cvcm;
 };
 
 }    // namespace LAMMPS_NS

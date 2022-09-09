@@ -42,7 +42,30 @@ FixNVTSllodEff::FixNVTSllodEff(LAMMPS *lmp, int narg, char **arg) :
 
   // default values
 
-  if (mtchain_default_flag) mtchain = 1;
+  if (mtchain_default_flag) {
+    mtchain = 1;
+
+    // Fix allocation of chain thermostats so that size_vector is correct
+    int ich;
+    delete[] eta;
+    delete[] eta_dot;
+    delete[] eta_dotdot;
+    delete[] eta_mass;
+    eta = new double[mtchain];
+
+    // add one extra dummy thermostat, set to zero
+
+    eta_dot = new double[mtchain+1];
+    eta_dot[mtchain] = 0.0;
+    eta_dotdot = new double[mtchain];
+    for (ich = 0; ich < mtchain; ich++) {
+      eta[ich] = eta_dot[ich] = eta_dotdot[ich] = 0.0;
+    }
+    eta_mass = new double[mtchain];
+
+    // Default mtchain in fix_nh is 3.
+    size_vector -= 2*2*(3-mtchain);
+  }
 
   // create a new compute temp style
   // id = fix-ID + temp

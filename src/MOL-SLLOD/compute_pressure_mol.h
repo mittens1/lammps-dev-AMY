@@ -13,21 +13,21 @@
 
 #ifdef COMPUTE_CLASS
 // clang-format off
-ComputeStyle(pressure/chunk,ComputePressureChunk);
+ComputeStyle(pressure/mol,ComputePressureMol);
 // clang-format on
 #else
 
-#ifndef LMP_COMPUTE_PRESSURE_CHUNK_H
-#define LMP_COMPUTE_PRESSURE_CHUNK_H
+#ifndef LMP_COMPUTE_PRESSURE_MOL_H
+#define LMP_COMPUTE_PRESSURE_MOL_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputePressureChunk : public Compute {
+class ComputePressureMol : public Compute {
  public:
-  ComputePressureChunk(class LAMMPS *, int, char **);
-  ~ComputePressureChunk() override;
+  ComputePressureMol(class LAMMPS *, int, char **);
+  virtual ~ComputePressureMol() override;
   void init() override;
   double compute_scalar() override;
   void compute_vector() override;
@@ -40,8 +40,6 @@ class ComputePressureChunk : public Compute {
   double *kspace_virial;
   Compute *temperature;
   char *id_temp;
-  char* idchunk;
-  class ComputeChunkAtom* cchunk;
   double virial[9];    // ordering: xx,yy,zz,xy,xz,yz,yx,zx,zy
   int pairhybridflag;
   class Pair *pairhybrid;

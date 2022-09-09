@@ -13,22 +13,23 @@
 
 #ifdef COMPUTE_CLASS
 // clang-format off
-ComputeStyle(temp/deform/chunk,ComputeTempDeformChunk);
+ComputeStyle(temp/deform/mol,ComputeTempDeformMol);
 // clang-format on
 #else
 
-#ifndef LMP_COMPUTE_TEMP_DEFORM_CHUNK_H
-#define LMP_COMPUTE_TEMP_DEFORM_CHUNK_H
+#ifndef LMP_COMPUTE_TEMP_DEFORM_MOL_H
+#define LMP_COMPUTE_TEMP_DEFORM_MOL_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputeTempDeformChunk : public Compute {
+class ComputeTempDeformMol : public Compute {
  public:
-  ComputeTempDeformChunk(class LAMMPS *, int, char **);
-  ~ComputeTempDeformChunk() override;
+  ComputeTempDeformMol(class LAMMPS *, int, char **);
+  ~ComputeTempDeformMol() override;
   void init() override;
+  void setup() override;
   double compute_scalar() override;
   void compute_vector() override;
 
@@ -37,33 +38,15 @@ class ComputeTempDeformChunk : public Compute {
   void restore_bias(int, double *) override;
   void restore_bias_all() override;
 
-  void lock_enable() override;
-  void lock_disable() override;
-  int lock_length() override;
-  void lock(class Fix *, bigint, bigint) override;
-  void unlock(class Fix *) override;
-
   double memory_usage() override;
 
  private:
-  int nchunk, maxchunk, comflag, biasflag, nmax;
-  int nvalues;
-  int *which;
-  char *idchunk;
-  class ComputeChunkAtom *cchunk;
+  int nmax;
   double adof, cdof, tfactor;
-  char *id_bias;
-  class Compute *tbias;    // ptr to additional bias compute
-  bigint comstep;
 
-  double *sum, *sumall;
-  int *count, *countall;
-  double *massproc, *masstotal;
-  double **com, **comall;
   double **vcm, **vcmall;
-  double **vthermal;
+  double **&vthermal = array;
 
-  void com_compute();
   void vcm_thermal_compute();
   void dof_compute();
   void allocate();
