@@ -30,6 +30,7 @@ class FixNVTSllod : public FixNH {
 
   void init() override;
   void nve_x() override;
+  void nve_v() override;
 
  private:
   int nondeformbias;

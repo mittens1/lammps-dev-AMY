@@ -32,6 +32,7 @@
 using namespace LAMMPS_NS;
 using namespace FixConst;
 
+enum{NOBIAS,BIAS};
 /* ---------------------------------------------------------------------- */
 
 FixNVTSllod::FixNVTSllod(LAMMPS *lmp, int narg, char **arg) :
@@ -142,7 +143,7 @@ void FixNVTSllod::nh_v_temp()
   //   calculate temperature since some computes require temp
   //   computed on current nlocal atoms to remove bias
 
-  if (nondeformbias) temperature->compute_scalar();
+  if (which == BIAS) temperature->compute_scalar();
 
   double **v = atom->v;
   double **x = atom->x;
@@ -153,25 +154,104 @@ void FixNVTSllod::nh_v_temp()
   double h_two[6],vdelu[3];
   MathExtra::multiply_shape_shape(domain->h_rate,domain->h_inv,h_two);
 
-  for (int i = 0; i < nlocal; i++) {
-    if (mask[i] & groupbit) {
-      if (!p_sllod) temperature->remove_bias(i,v[i]);
-      vdelu[0] = h_two[0]*v[i][0] + h_two[5]*v[i][1] + h_two[4]*v[i][2];
-      vdelu[1] = h_two[1]*v[i][1] + h_two[3]*v[i][2];
-      vdelu[2] = h_two[2]*v[i][2];
-      if (p_sllod && peculiar) {
-        vdelu[0] += h_two[0]*h_two[0]*x[i][0];
-        vdelu[1] += h_two[1]*h_two[1]*x[i][1];
-        vdelu[2] += h_two[2]*h_two[2]*x[i][2];
+  if (peculiar) {
+    for (int i = 0; i < nlocal; i++) {
+      if (mask[i] & groupbit) {
+        if (which == BIAS) temperature->remove_bias(i,v[i]);
+        v[i][0] = v[i][0]*factor_eta;
+        v[i][1] = v[i][1]*factor_eta;
+        v[i][2] = v[i][2]*factor_eta;
+        if (which == BIAS) temperature->restore_bias(i,v[i]);
       }
-      if (p_sllod) temperature->remove_bias(i,v[i]);
-      v[i][0] = v[i][0]*factor_eta - dthalf*vdelu[0];
-      v[i][1] = v[i][1]*factor_eta - dthalf*vdelu[1];
-      v[i][2] = v[i][2]*factor_eta - dthalf*vdelu[2];
-      temperature->restore_bias(i,v[i]);
+    }
+  } else {
+    for (int i = 0; i < nlocal; i++) {
+      if (mask[i] & groupbit) {
+        if (!p_sllod) temperature->remove_bias(i,v[i]);
+        vdelu[0] = h_two[0]*v[i][0] + h_two[5]*v[i][1] + h_two[4]*v[i][2];
+        vdelu[1] = h_two[1]*v[i][1] + h_two[3]*v[i][2];
+        vdelu[2] = h_two[2]*v[i][2];
+        if (p_sllod) temperature->remove_bias(i,v[i]);
+        v[i][0] = v[i][0]*factor_eta - dthalf*vdelu[0];
+        v[i][1] = v[i][1]*factor_eta - dthalf*vdelu[1];
+        v[i][2] = v[i][2]*factor_eta - dthalf*vdelu[2];
+        temperature->restore_bias(i,v[i]);
+      }
     }
   }
 }
+
+void FixNVTSllod::nve_v()
+{
+  double dtfm, dtf2, inv_mass;
+  double **x = atom->x;
+  double **v = atom->v;
+  double **f = atom->f;
+  double *rmass = atom->rmass;
+  double *mass = atom->mass;
+  int *type = atom->type;
+  int *mask = atom->mask;
+  int nlocal = atom->nlocal;
+  if (igroup == atom->firstgroup) nlocal = atom->nfirst;
+
+  double h_two[6];
+  MathExtra::multiply_shape_shape(domain->h_rate,domain->h_inv,h_two);
+
+  double fac_vu[3];
+  if (peculiar) {
+    dtf2 = 0.5*dtf;
+    fac_vu[0] = exp(-h_two[0]*dtf2);
+    fac_vu[1] = exp(-h_two[1]*dtf2);
+    fac_vu[2] = exp(-h_two[2]*dtf2);
+  }
+  for (int i = 0; i < nlocal; i++) {
+    if (mask[i] & groupbit) {
+      if (rmass) inv_mass = 1 / rmass[i];
+      else inv_mass = 1 / mass[type[i]];
+
+      if (peculiar) {
+        // First half step with SLLOD force. Quarter step x since no dependants
+        if (which == BIAS) temperature->remove_bias(i,v[i]);
+        v[i][0] *= fac_vu[0];
+        v[i][1] *= fac_vu[1];
+        v[i][2] *= fac_vu[2];
+        if (p_sllod) {
+          v[i][2] += dtf2*(f[i][0]*inv_mass - h_two[2]*h_two[2]*x[i][2]);
+          v[i][1] += dtf2*(f[i][1]*inv_mass - h_two[3]*v[i][2] -
+                           h_two[1]*h_two[1]*x[i][1]);
+          v[i][0] += dtf*(f[i][0]*inv_mass - h_two[5]*v[i][1] -
+                          h_two[4]*v[i][2]) - h_two[0]*h_two[0]*x[i][0];
+        } else {
+          v[i][2] += dtf2*f[i][2]*inv_mass;
+          v[i][1] += dtf2*(f[i][1]*inv_mass - h_two[3]*v[i][2]);
+          v[i][0] += dtf*(f[i][0]*inv_mass - h_two[5]*v[i][1] - h_two[4]*v[i][2]);
+        }
+      } else {
+        // Half step velocity
+        v[i][0] += dtfm*f[i][0];
+        v[i][1] += dtfm*f[i][1];
+        v[i][2] += dtfm*f[i][2];
+      }
+
+      // 2nd half step SLLOD force
+      if (peculiar) {
+        if (p_sllod) {
+          v[i][1] += dtf2*(f[i][1]*inv_mass - h_two[3]*v[i][2] -
+                           h_two[1]*h_two[1]*x[i][1]);
+          v[i][2] += dtf2*(f[i][0]*inv_mass - h_two[2]*h_two[2]*x[i][2]);
+        } else {
+          v[i][1] += dtf2*(f[i][1]*inv_mass - h_two[3]*v[i][2]);
+          v[i][2] += dtf2*f[i][2]*inv_mass;
+        }
+        v[i][0] *= fac_vu[0];
+        v[i][1] *= fac_vu[1];
+        v[i][2] *= fac_vu[2];
+        if (which == BIAS) temperature->restore_bias(i,v[i]);
+      }
+    }
+  }
+}
+
 
 /* ----------------------------------------------------------------------
    perform full-step update of positions
@@ -183,7 +263,7 @@ void FixNVTSllod::nve_x()
   double **v = atom->v;
   int *mask = atom->mask;
   double vstream[3], h_two[6], xfac[3];
-  double dthalf = dtv*0.5;
+  double dtv2 = dtv*0.5;
   int nlocal = atom->nlocal;
   if (igroup == atom->firstgroup) nlocal = atom->nfirst;
 
@@ -191,31 +271,46 @@ void FixNVTSllod::nve_x()
   
   if (peculiar) {
     MathExtra::multiply_shape_shape(domain->h_rate,domain->h_inv,h_two);
-    xfac[0] = 1 / (1 - dthalf*h_two[0]);
-    xfac[1] = 1 / (1 - dthalf*h_two[1]);
-    xfac[2] = 1 / (1 - dthalf*h_two[2]);
+    // xfac[0] = 1 / (1 - dthalf*h_two[0]);
+    // xfac[1] = 1 / (1 - dthalf*h_two[1]);
+    // xfac[2] = 1 / (1 - dthalf*h_two[2]);
+    xfac[0] = exp(h_two[0]*dtv2);
+    xfac[1] = exp(h_two[1]*dtv2);
+    xfac[2] = exp(h_two[2]*dtv2);
   }
 
   for (int i = 0; i < nlocal; i++) {
     if (mask[i] & groupbit) {
       if (peculiar) {
-        // First half step - solve for streaming velocity at t+dt/2
-        x[i][2] += dthalf * v[i][2];
-        x[i][2] *= xfac[2];
-        vstream[2] = h_two[2]*x[i][2];
-
-        x[i][1] += dthalf * (v[i][1] + h_two[3]*x[i][2]);
-        x[i][1] *= xfac[1];
-        vstream[1] = h_two[1]*x[i][1] + h_two[3]*x[i][2];
-
-        x[i][0] += dthalf * (v[i][0] + h_two[5]*x[i][1] + h_two[4]*x[i][2]);
         x[i][0] *= xfac[0];
-        vstream[0] = h_two[0]*x[i][0] + h_two[5]*x[i][1] + h_two[4]*x[i][2];
+        x[i][1] *= xfac[1];
+        x[i][2] *= xfac[2];
+        x[i][2] += dtv2 * v[i][2];
+        x[i][1] += dtv2 * (v[i][1] + h_two[3]*x[i][2]);
+        x[i][0] += dtv * (v[i][0] + h_two[5]*x[i][1] + h_two[4]*x[i][2]);
+        x[i][1] += dtv2 * (v[i][1] + h_two[3]*x[i][2]);
+        x[i][2] += dtv2 * v[i][2];
+        x[i][0] *= xfac[0];
+        x[i][1] *= xfac[1];
+        x[i][2] *= xfac[2];
 
-        // 2nd half step - use streaming velocity from t+dt/2
-        x[i][0] += dthalf * (v[i][0] + vstream[0]);
-        x[i][1] += dthalf * (v[i][1] + vstream[1]);
-        x[i][2] += dthalf * (v[i][2] + vstream[2]);
+        // First half step - solve for streaming velocity at t+dt/2
+        // x[i][2] += dthalf * v[i][2];
+        // x[i][2] *= xfac[2];
+        // vstream[2] = h_two[2]*x[i][2];
+
+        // x[i][1] += dthalf * (v[i][1] + h_two[3]*x[i][2]);
+        // x[i][1] *= xfac[1];
+        // vstream[1] = h_two[1]*x[i][1] + h_two[3]*x[i][2];
+
+        // x[i][0] += dthalf * (v[i][0] + h_two[5]*x[i][1] + h_two[4]*x[i][2]);
+        // x[i][0] *= xfac[0];
+        // vstream[0] = h_two[0]*x[i][0] + h_two[5]*x[i][1] + h_two[4]*x[i][2];
+
+        // // 2nd half step - use streaming velocity from t+dt/2
+        // x[i][0] += dthalf * (v[i][0] + vstream[0]);
+        // x[i][1] += dthalf * (v[i][1] + vstream[1]);
+        // x[i][2] += dthalf * (v[i][2] + vstream[2]);
       } else {
         x[i][0] += dtv * v[i][0];
         x[i][1] += dtv * v[i][1];
