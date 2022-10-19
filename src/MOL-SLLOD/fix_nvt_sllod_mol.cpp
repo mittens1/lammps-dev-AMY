@@ -20,6 +20,7 @@
 
 #include "atom.h"
 #include "compute.h"
+#include "compute_temp_mol.h"
 #include "domain.h"
 #include "error.h"
 #include "fix_deform.h"
@@ -34,6 +35,11 @@
 using namespace LAMMPS_NS;
 using namespace FixConst;
 
+// from FixNH:
+enum{NOBIAS,BIAS};
+
+// from FixDeform:
+enum{NONE=0,FINAL,DELTA,SCALE,VEL,ERATE,TRATE,VOLUME,WIGGLE,VARIABLE};
 /* ---------------------------------------------------------------------- */
 
 FixNVTSllodMol::FixNVTSllodMol(LAMMPS *lmp, int narg, char **arg) :
@@ -71,39 +77,13 @@ FixNVTSllodMol::FixNVTSllodMol(LAMMPS *lmp, int narg, char **arg) :
     size_vector -= 2*2*(3-mtchain);
   }
 
-
-  kickflag = 0;
-
-  int iarg = 3;
-
-  while (iarg < narg) {
-    if (strcmp(arg[iarg++], "kick")==0) {
-      if (iarg >= narg) error->all(FLERR,"Invalid fix nvt/sllod/mol command");
-      if (strcmp(arg[iarg], "yes")==0) {
-        kickflag = 1;
-      } else if (strcmp(arg[iarg], "no")==0) {
-        kickflag = 0;
-      } else error->all(FLERR,"Invalid fix nvt/sllod/mol command");
-    }
-    ++iarg;
-  }
-
   // create a new compute temp style
   // id = fix-ID + temp
 
   id_temp = utils::strdup(std::string(id) + "_temp");
-  modify->add_compute(fmt::format("{} {} temp/deform/mol",
+  modify->add_compute(fmt::format("{} {} temp/mol",
                                   id_temp,group->names[igroup]));
   tcomputeflag = 1;
-  vcm = nullptr;
-  vcmall = nullptr;
-}
-
-/* ---------------------------------------------------------------------- */
-FixNVTSllodMol::~FixNVTSllodMol() {
-  // property_molecule may have already been destroyed
-  if (atom->property_molecule != nullptr)
-    atom->property_molecule->destroy_permolecule(&vcmall);   // Also destroys vcm
 }
 
 /* ---------------------------------------------------------------------- */
@@ -111,59 +91,72 @@ FixNVTSllodMol::~FixNVTSllodMol() {
 void FixNVTSllodMol::init() {
   FixNH::init();
 
-  if (!temperature->tempbias)
-    error->all(FLERR,"Temperature for fix nvt/sllod/mol does not have a bias");
+  // if (!temperature->tempbias)
+  //   error->all(FLERR,"Temperature for fix nvt/sllod/mol does not have a bias");
 
-  nondeformbias = 0;
-  if (strcmp(temperature->style,"temp/deform/mol") != 0) nondeformbias = 1;
+  // nondeformbias = 0;
+  // if (strcmp(temperature->style,"temp/deform/mol") != 0) nondeformbias = 1;
+
+  // Check that temperature calculates a molecular temperature
+  // TODO(SS): add moltemp flag to compute.h that we can check?
+  if (strcmp(temperature->style, "temp/mol") != 0)
+    error->all(FLERR,"fix nvt/sllod/mol requires temperature computed by "
+        "compute temp/mol");
 
   // check fix deform remap settings
 
   int i;
   for (i = 0; i < modify->nfix; i++)
     if (strncmp(modify->fix[i]->style,"deform",6) == 0) {
-      if ((dynamic_cast<FixDeform *>( modify->fix[i]))->remapflag != Domain::V_REMAP)
+      auto def = dynamic_cast<FixDeform *>(modify->fix[i]);
+      if ((dynamic_cast<FixDeform *>( modify->fix[i]))->remapflag != Domain::NO_REMAP)
         error->all(FLERR,"Using fix nvt/sllod/mol with inconsistent fix deform "
                    "remap option");
+      bool elongation = false;
+      for (int j = 0; j < 3; ++j) {
+        if (def->set[i].style) {
+          elongation = true;
+          if (def->set[j].style != TRATE)
+            error->all(FLERR,"fix nvt/sllod/mol requires the trate style for "
+                "x/y/z deformation");
+        }
+      }
+      for (int j = 3; j < 6; ++j) {
+        if (def->set[j].style && def->set[j].style != ERATE) {
+          if (elongation)
+            error->all(FLERR,"fix nvt/sllod/mol requires the erate style for "
+                "xy/xz/yz deformation under mixed shear/extensional flow");
+          else
+            error->warning(FLERR,
+                "Using non-constant shear rate with fix nvt/sllod/mol");
+        }
+      }
+      if (def->set[5].style && def->set[5].rate != 0.0 &&
+          (def->set[3].style || domain->yz != 0.0) &&
+          (def->set[4].style != ERATE || def->set[5].style != ERATE
+           || (def->set[3].style && def->set[3].style != ERATE))
+          )
+        error->warning(FLERR,"Shearing xy with a yz tilt is only handled "
+            "correctly if fix deform uses the erate style for xy, xz and yz");
       break;
     }
   if (i == modify->nfix)
     error->all(FLERR,"Using fix nvt/sllod/mol with no fix deform defined");
 
-  if (atom->property_molecule == nullptr)
-    error->all(FLERR, "fix nvt/sllod/mol requires a fix property/molecule to be defined with the com option");
-
-  // TODO: maybe just register with fix property/molecule that we need COM to avoid this?
-  if (!atom->property_molecule->com_flag)
-    error->all(FLERR, "fix nvt/sllod/mol requires a fix property/molecule to be defined with the com option");
-
-  // Set up handling of vcm memory
-  atom->property_molecule->register_permolecule("nvt/sllod/mol:vcmall", &vcmall, Atom::DOUBLE, 3);
-  atom->property_molecule->register_permolecule("nvt/sllod/mol:vcm", &vcm, Atom::DOUBLE, 3);
-  
+  // TODO(SS): maybe just register with fix property/molecule that we need COM to avoid this?
+  if (atom->property_molecule == nullptr || !atom->property_molecule->com_flag)
+    error->all(FLERR, "fix nvt/sllod/mol requires a fix property/molecule to be "
+        "defined with the com option");
 }
 
 void FixNVTSllodMol::setup(int vflag) {
   FixNH::setup(vflag);
 
-  // Check for fix property/molecule
-  if (atom->property_molecule == nullptr)
-    error->all(FLERR,"fix nvt/sllod/mol requires a fix property/molecule to be defined");
-
-  // Apply kick if necessary
-  if (kickflag) {
-    // Call remove_bias first to calculate biases
-    // temperature->compute_scalar(); // compute_scalar already called in FixNH::setup()
-    temperature->remove_bias_all();
-
-    // Restore twice to apply streaming profile
-    temperature->restore_bias_all();
-    temperature->restore_bias_all();
-
-    // Don't kick again if multi-step run
-    kickflag = 0;
-  }
-
+  // Check for fix property/molecule in case it's been deleted.
+  // TODO(SS): Is this needed?
+  if (atom->property_molecule == nullptr || !atom->property_molecule->com_flag)
+    error->all(FLERR, "fix nvt/sllod/mol requires a fix property/molecule to be "
+        "defined with the com option");
 }
 
 /* ----------------------------------------------------------------------
@@ -171,20 +164,25 @@ void FixNVTSllodMol::setup(int vflag) {
 -----------------------------------------------------------------------*/
 
 void FixNVTSllodMol::nh_v_temp() {
-  // remove and restore bias = streaming velocity = Hrate*lamda + Hratelo
+  // velocities stored as peculiar velocity (i.e. they don't include the SLLOD
+  //   streaming velocity), so remove/restore bias will only be needed if some
+  //   extra bias is being calculated.
   // thermostat thermal velocity only
   // vdelu = SLLOD correction = Hrate*Hinv*vthermal
-  // for non temp/deform BIAS:
+  // for temperature compute with BIAS:
   //   calculate temperature since some computes require temp
   //   computed on current nlocal atoms to remove bias
 
-  if (nondeformbias) temperature->compute_scalar();
+  if (which == BIAS) {
+    temperature->compute_scalar();
+    temperature->remove_bias_all();
+  }
 
-  // Remove bias from all atoms at once to avoid re-calculating the COM positions
-  temperature->remove_bias_all();
+  // Use molecular centre-of-mass velocity when calculating thermostat force
+  auto temp_mol = dynamic_cast<ComputeTempMol*>(temperature);
+  temp_mol->vcm_compute();
+  double **vcmall = temp_mol->vcmall;
 
-  // Use molecular centre-of-mass velocity when calculating SLLOD correction
-  vcm_thermal_compute();
   tagint *molecule = atom->molecule;
   int m;
 
@@ -194,83 +192,194 @@ void FixNVTSllodMol::nh_v_temp() {
   int nlocal = atom->nlocal;
   if (igroup == atom->firstgroup) nlocal = atom->nfirst;
 
-  double h_two[6],vdelu[3],*vcom;
-  MathExtra::multiply_shape_shape(domain->h_rate,domain->h_inv,h_two);
+  double *vcom;
 
   for (int i = 0; i < nlocal; i++) {
     if (mask[i] & groupbit) {
       m = molecule[i]-1;
       if (m < 0) vcom = v[i];  // CoM velocity of single atom is just v[i]
       else vcom = vcmall[m];
-      // NOTE: This uses the thermal velocity of the molecule centre-of-mass in all cases
-      vdelu[0] = h_two[0]*vcom[0] + h_two[5]*vcom[1] + h_two[4]*vcom[2];
-      vdelu[1] = h_two[1]*vcom[1] + h_two[3]*vcom[2];
-      vdelu[2] = h_two[2]*vcom[2];
-      v[i][0] = v[i][0] - vcom[0] + vcom[0]*factor_eta - dthalf*vdelu[0];
-      v[i][1] = v[i][1] - vcom[1] + vcom[1]*factor_eta - dthalf*vdelu[1];
-      v[i][2] = v[i][2] - vcom[2] + vcom[2]*factor_eta - dthalf*vdelu[2];
+      v[i][0] = v[i][0] - vcom[0] + vcom[0]*factor_eta;
+      v[i][1] = v[i][1] - vcom[1] + vcom[1]*factor_eta;
+      v[i][2] = v[i][2] - vcom[2] + vcom[2]*factor_eta;
     }
   }
-  temperature->restore_bias_all();
+
+  if (which == BIAS) temperature->restore_bias_all();
 }
 
-/* calculate COM thermal velocity. 
- * Pre: atom velocities should have streaming bias removed
- *      COM positions should already be computed when removing biases
- */
-void FixNVTSllodMol::vcm_thermal_compute() {
-  int m;
-  double massone;
+/* ----------------------------------------------------------------------
+   perform half-step update of peculiar velocities
+-----------------------------------------------------------------------*/
+
+void FixNVTSllodMol::nve_v()
+{
+  double dtfm, dtf2;
+  double **x = atom->x;
+  double **v = atom->v;
+  double **f = atom->f;
+  double *rmass = atom->rmass;
+  double *mass = atom->mass;
+  int *type = atom->type;
+  int *mask = atom->mask;
+  int nlocal = atom->nlocal;
+  if (igroup == atom->firstgroup) nlocal = atom->nfirst;
 
   tagint *molecule = atom->molecule;
-  tagint nmolecule = atom->property_molecule->nmolecule;
+  tagint m;
 
+  auto temp_mol = dynamic_cast<ComputeTempMol*>(temperature);
+  double **vcmall = temp_mol->vcmall;
+  double **&xcmall = atom->property_molecule->com;
 
-  // zero local per-molecule values
+  double grad_u[6], vfac[3], vcom_half[3];
+  double* h_rate = domain->h_rate;
+  double* h_inv = domain->h_inv;
+  MathExtra::multiply_shape_shape(h_rate, h_inv, grad_u);
 
-  for (int i = 0; i < nmolecule; i++){
-    vcm[i][0] = vcm[i][1] = vcm[i][2] = 0.0;
+  dtf2 = 0.5*dtf;
+  vfac[0] = exp(-grad_u[0]*dtf2);
+  vfac[1] = exp(-grad_u[1]*dtf2);
+  vfac[2] = exp(-grad_u[2]*dtf2);
+
+  if (which == BIAS) temperature->remove_bias_all();
+
+  // Reversible half step
+  double *vcom;
+  for (int i = 0; i < nlocal; i++) {
+    if (mask[i] & groupbit) {
+      if (rmass) dtfm = dtf / rmass[i];
+      else dtfm = dtf / mass[type[i]];
+
+      m = molecule[i]-1;
+      if (m < 0) vcom = v[i];
+      else vcom = vcmall[m];
+
+      // First half step SLLOD force on CoM
+      vcom_half[0] = vcom[0]*vfac[0];
+      vcom_half[1] = vcom[1]*vfac[1];
+      vcom_half[2] = vcom[2]*vfac[2];
+      vcom_half[1] -= dtf2*grad_u[3]*vcom_half[2];
+      vcom_half[0] -= dtf2*(grad_u[5]*vcom_half[1] + grad_u[4]*vcom_half[2]);
+
+      // Update v[i] due to SLLOD force on CoM + f[i] on atom
+      v[i][0] = v[i][0] - vcom[0] + vcom_half[0] + dtfm*f[i][0];
+      v[i][1] = v[i][1] - vcom[1] + vcom_half[1] + dtfm*f[i][1];
+      v[i][2] = v[i][2] - vcom[2] + vcom_half[2] + dtfm*f[i][2];
+    }
   }
 
-  // compute VCM for each molecule
+  // Get new vcmall
+  // No need to pass ke_singles pointer since we only care about vcmall
+  temp_mol->vcm_compute();
 
-  double **v = atom->v;
-  int *mask = atom->mask;
-  int *type = atom->type;
-
-  imageint *image = atom->image;
-  int xbox, ybox, zbox;
-  double v_adjust[3];
-
-  double *mass = atom->mass;
-  double *rmass = atom->rmass;
-  double *molmass = atom->property_molecule->mass;
-  int nlocal = atom->nlocal;
-
-  for (int i = 0; i < nlocal; i++)
+  // 2nd reversible half step
+  for (int i = 0; i < nlocal; i++) {
     if (mask[i] & groupbit) {
       m = molecule[i]-1;
-      if (m < 0) continue;
-      if (rmass) {
-        massone = rmass[i];
-      } else {
-        massone = mass[type[i]];
-      }
-      // Adjust the velocity to reflect the thermal velocity 
-      vcm[m][0] += v[i][0] * massone;
-      vcm[m][1] += v[i][1] * massone;
-      vcm[m][2] += v[i][2] * massone;
+      if (m < 0) vcom = v[i];
+      else vcom = vcmall[m];
+
+      // 2nd half step SLLOD force on CoM
+      vcom_half[0] = vcom[0] - dtf2*(grad_u[5]*vcom[1] + grad_u[4]*vcom[2]);
+      vcom_half[1] = vcom[1] - dtf2*grad_u[3]*vcom[2];
+      vcom_half[2] = vcom[2]*vfac[2];
+      vcom_half[1] *= vfac[1];
+      vcom_half[0] *= vfac[0];
+
+      // Update v[i] due to SLLOD force
+      v[i][0] = v[i][0] - vcom[0] + vcom_half[0];
+      v[i][1] = v[i][1] - vcom[1] + vcom_half[1];
+      v[i][2] = v[i][2] - vcom[2] + vcom_half[2];
     }
+  }
+  if (which == BIAS) temperature->restore_bias_all();
+}
 
-  MPI_Allreduce(&vcm[0][0],&vcmall[0][0],3*nmolecule,MPI_DOUBLE,MPI_SUM,world);
 
-  for (int m = 0; m < nmolecule; m++) {
-    if (molmass[m] > 0.0) {
-      vcmall[m][0] /= molmass[m];
-      vcmall[m][1] /= molmass[m];
-      vcmall[m][2] /= molmass[m];
-    } else {
-      vcmall[m][0] = vcmall[m][1] = vcmall[m][2] = 0.0;
+/* ----------------------------------------------------------------------
+   perform full-step update of positions
+-----------------------------------------------------------------------*/
+
+void FixNVTSllodMol::nve_x()
+{
+  double **x = atom->x;
+  double **v = atom->v;
+  int *mask = atom->mask;
+  double vstream[3], grad_u[6], xfac[3];
+  double dtv2 = dtv*0.5;
+  int nlocal = atom->nlocal;
+
+  double *xcom, xcom_half[3], molcom[3];
+  double **&com = atom->property_molecule->com;
+  tagint *molecule = atom->molecule;
+  tagint m;
+
+  if (igroup == atom->firstgroup) nlocal = atom->nfirst;
+
+  // x update by full step only for atoms in group
+  
+  double* h_rate = domain->h_rate;
+  double* h_inv = domain->h_inv;
+  MathExtra::multiply_shape_shape(h_rate, h_inv, grad_u);
+  xfac[0] = exp(grad_u[0]*dtv2);
+  xfac[1] = exp(grad_u[1]*dtv2);
+  xfac[2] = exp(grad_u[2]*dtv2);
+
+  // First half step
+  for (int i = 0; i < nlocal; i++) {
+    if (mask[i] & groupbit) {
+      m = molecule[i]-1;
+      if (m < 0) xcom = x[i];
+      else {
+        // Need to remap molecular CoM to be nearest image to x[i] so that
+        // streaming velocity is correct, since com stores unwrapped coords
+        // This means that these equations of motion are only correct if
+        // molecules are smaller than the length of the box
+        molcom[0] = com[m][0];
+        molcom[1] = com[m][1];
+        molcom[2] = com[m][2];
+        domain->remap_near(molcom, x[i]);
+        xcom = molcom;
+      }
+
+      xcom_half[0] = xcom[0]*xfac[0];
+      xcom_half[1] = xcom[1]*xfac[1];
+      xcom_half[2] = xcom[2]*xfac[2];
+      xcom_half[1] += dtv2*grad_u[3]*xcom_half[2];
+      xcom_half[0] += dtv2*(grad_u[5]*xcom_half[1] + grad_u[4]*xcom_half[2]);
+
+      x[i][0] = x[i][0] - xcom[0] + xcom_half[0] + dtv*v[i][0];
+      x[i][1] = x[i][1] - xcom[1] + xcom_half[1] + dtv*v[i][1];
+      x[i][2] = x[i][2] - xcom[2] + xcom_half[2] + dtv*v[i][2];
+    }
+  }
+
+  // Update CoM
+  atom->property_molecule->com_compute();
+
+  // 2nd reversible half step
+  for (int i = 0; i < nlocal; i++) {
+    if (mask[i] & groupbit) {
+      m = molecule[i]-1;
+      if (m < 0) xcom = x[i];
+      else {
+        molcom[0] = com[m][0];
+        molcom[1] = com[m][1];
+        molcom[2] = com[m][2];
+        domain->remap_near(molcom, x[i]);
+        xcom = molcom;
+      }
+
+      xcom_half[0] = xcom[0] + dtv2*(grad_u[5]*xcom[1] + grad_u[4]*xcom[2]);
+      xcom_half[1] = xcom[1] + dtv2*grad_u[3]*xcom[2];
+      xcom_half[2] = xcom[2]*xfac[2];
+      xcom_half[1] *= xfac[1];
+      xcom_half[0] *= xfac[0];
+
+      x[i][0] = x[i][0] - xcom[0] + xcom_half[0];
+      x[i][1] = x[i][1] - xcom[1] + xcom_half[1];
+      x[i][2] = x[i][2] - xcom[2] + xcom_half[2];
     }
   }
 }

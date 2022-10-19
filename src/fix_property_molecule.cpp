@@ -184,6 +184,7 @@ void FixPropertyMolecule::grow_permolecule() {
 ------------------------------------------------------------------------- */
 
 void FixPropertyMolecule::mass_compute() {
+  if (nmolecule == 0) return;
   double massone;
   for (tagint m = 0; m < nmolecule; ++m)
     massproc[m] = 0.0;
@@ -226,6 +227,7 @@ void FixPropertyMolecule::pre_force_respa(int vflag, int /*ilevel*/, int /*iloop
 
 void FixPropertyMolecule::com_compute() {
   comstep = update->ntimestep;
+  if (nmolecule == 0) return; // Prevent segfault if no molecules exit
 
   int nlocal = atom->nlocal;
   tagint *molecule = atom->molecule;

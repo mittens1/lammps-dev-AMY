@@ -966,7 +966,6 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
       cvatom[i][6] = 0.0;
       cvatom[i][7] = 0.0;
       cvatom[i][8] = 0.0;
-      // cvatom[i][9] = 0.0; // NOTE: Memory allocated as Nx9, so this is probably wrong
     }
   }
 
@@ -1534,11 +1533,29 @@ void Pair::vmol_tally(int i, int j, int nlocal, int newton_pair,
 
   tagint mol_i = atom->molecule[i]-1;
   tagint mol_j = atom->molecule[j]-1;
-  double *com_i, *com_j;
+
+  // com is stored in unwrapped coordinates, so need to map near each other
+  // NOTE: this assumes that an atom is always closer to the CoM of the
+  //       molecule it belongs to than to any image of that CoM. This may not
+  //       hold for molecules that are longer than half the box length, but
+  //       there doesn't seem to be a good solution for this
+  double *com_i, *com_j, com_tmp_i[3], com_tmp_j[3];
   if (mol_i < 0) com_i = atom->x[i];
-  else com_i = com[mol_i];
+  else {
+    com_tmp_i[0] = com[mol_i][0];
+    com_tmp_i[1] = com[mol_i][1];
+    com_tmp_i[2] = com[mol_i][2];
+    domain->remap_near(com_tmp_i, atom->x[i]);
+    com_i = com_tmp_i;
+  }
   if (mol_j < 0) com_j = atom->x[j];
-  else com_j = com[mol_j];
+  else {
+    com_tmp_j[0] = com[mol_j][0];
+    com_tmp_j[1] = com[mol_j][1];
+    com_tmp_j[2] = com[mol_j][2];
+    domain->remap_near(com_tmp_j, atom->x[j]);
+    com_j = com_tmp_j;
+  }
 
   for (int d = 0; d < 3; d++) {
     delcom[d] = com_i[d] - com_j[d];
@@ -1606,11 +1623,28 @@ void Pair::vmol_tally_xyz(int i, int j, int nlocal, int newton_pair,
   tagint mol_i = atom->molecule[i]-1;
   tagint mol_j = atom->molecule[j]-1;
 
-  double *com_i, *com_j;
+  // com is stored in unwrapped coordinates, so need to map near each other
+  // NOTE: this assumes that an atom is always closer to the CoM of the
+  //       molecule it belongs to than to any image of that CoM. This may not
+  //       hold for molecules that are longer than half the box length, but
+  //       there doesn't seem to be a good solution for this
+  double *com_i, *com_j, com_tmp_i[3], com_tmp_j[3];
   if (mol_i < 0) com_i = atom->x[i];
-  else com_i = com[i];
+  else {
+    com_tmp_i[0] = com[mol_i][0];
+    com_tmp_i[1] = com[mol_i][1];
+    com_tmp_i[2] = com[mol_i][2];
+    domain->remap_near(com_tmp_i, atom->x[i]);
+    com_i = com_tmp_i;
+  }
   if (mol_j < 0) com_j = atom->x[j];
-  else com_j = com[j];
+  else {
+    com_tmp_j[0] = com[mol_j][0];
+    com_tmp_j[1] = com[mol_j][1];
+    com_tmp_j[2] = com[mol_j][2];
+    domain->remap_near(com_tmp_j, atom->x[j]);
+    com_j = com_tmp_j;
+  }
 
   for (int d = 0; d < 3; d++) {
     delcom[d] = com_i[d] - com_j[d];

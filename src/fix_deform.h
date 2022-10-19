@@ -42,6 +42,7 @@ class FixDeform : public Fix {
 
  protected:
   void update_box();
+  double calc_xz_correction(double);
 
   int triclinic, scaleflag, flipflag;
   int flip, flipxy, flipxz, flipyz;
@@ -72,6 +73,10 @@ class FixDeform : public Fix {
   Set *set;
 
   void options(int, char **);
+
+  // For correctness checking of set[i].style
+  friend class FixNVTSllod;
+  friend class FixNVTSllodMol;
 };
 
 }    // namespace LAMMPS_NS

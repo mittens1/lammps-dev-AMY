@@ -29,14 +29,14 @@ class FixNVTSllod : public FixNH {
   FixNVTSllod(class LAMMPS *, int, char **);
 
   void init() override;
-  void nve_x() override;
-  void nve_v() override;
 
  private:
   int nondeformbias;
   int p_sllod, peculiar;
 
   void nh_v_temp() override;
+  void nve_x() override;
+  void nve_v() override;
 };
 
 }    // namespace LAMMPS_NS

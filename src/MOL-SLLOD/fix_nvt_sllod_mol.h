@@ -27,23 +27,15 @@ namespace LAMMPS_NS {
 class FixNVTSllodMol : public FixNH {
  public:
   FixNVTSllodMol(class LAMMPS *, int, char **);
-  ~FixNVTSllodMol();
 
   void init() override;
   void setup(int) override;
 
  private:
-  int nondeformbias;
-  // int nchunk, maxchunk;
-  int kickflag;           // Whether to apply the streaming profile on init
-  double **vcm, **vcmall;
-  // double *massproc, *masstotal;
-
   void nh_v_temp() override;
   void vcm_thermal_compute();
-
-  // class ComputeChunkAtom *cchunk;
-  // class ComputeVCMChunk *cvcm;
+  void nve_v() override;
+  void nve_x() override;
 };
 
 }    // namespace LAMMPS_NS

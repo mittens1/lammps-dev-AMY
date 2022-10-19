@@ -78,8 +78,10 @@ ComputeTempDeformMol::~ComputeTempDeformMol()
   memory->destroy(vthermal);
 
   // property_molecule may have already been destroyed
-  if (atom->property_molecule != nullptr)
+  if (atom->property_molecule != nullptr) {
+    atom->property_molecule->destroy_permolecule(vcm);
     atom->property_molecule->destroy_permolecule(vcmall);
+  }
 }
 
 /* ---------------------------------------------------------------------- */

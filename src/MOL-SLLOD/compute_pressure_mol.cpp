@@ -40,7 +40,7 @@ ComputePressureMol::ComputePressureMol(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg),
   vptr(nullptr), id_temp(nullptr), pstyle(nullptr)
 {
-  if (narg < 5) error->all(FLERR,"Illegal compute pressure command");
+  if (narg < 4) error->all(FLERR,"Illegal compute pressure command");
   if (igroup) error->all(FLERR,"Compute pressure must use group all");
 
   scalar_flag = vector_flag = 1;
@@ -181,7 +181,7 @@ void ComputePressureMol::init()
   }
 
   // detect contributions to virial
-  // vptr points to all virial[6] contributions
+  // vptr points to all molecule_virial[9] contributions
 
   delete [] vptr;
   nvirial = 0;
@@ -190,12 +190,6 @@ void ComputePressureMol::init()
   //if (pairhybridflag && force->pair) nvirial++;
   if (pairflag && force->pair) nvirial++;
   /*
-  if (atom->molecular != Atom::ATOMIC) {
-    if (bondflag && force->bond) nvirial++;
-    if (angleflag && force->angle) nvirial++;
-    if (dihedralflag && force->dihedral) nvirial++;
-    if (improperflag && force->improper) nvirial++;
-  }
   if (fixflag)
     for (auto &ifix : modify->get_fix_list())
       if (ifix->thermo_virial) nvirial++;
@@ -212,16 +206,10 @@ void ComputePressureMol::init()
     */
     if (pairflag && force->pair) vptr[nvirial++] = force->pair->molecule_virial;
     /*
-    if (bondflag && force->bond) vptr[nvirial++] = force->bond->virial;
-    if (angleflag && force->angle) vptr[nvirial++] = force->angle->virial;
-    if (dihedralflag && force->dihedral)
-      vptr[nvirial++] = force->dihedral->virial;
-    if (improperflag && force->improper)
-      vptr[nvirial++] = force->improper->virial;
     if (fixflag)
-    for (auto &ifix : modify->get_fix_list())
-      if (ifix->virial_global_flag && ifix->thermo_virial)
-          vptr[nvirial++] = ifix->virial;
+      for (auto &ifix : modify->get_fix_list())
+        if (ifix->virial_global_flag && ifix->thermo_virial)
+            vptr[nvirial++] = ifix->virial;
     */
   }
 
@@ -288,12 +276,10 @@ void ComputePressureMol::compute_vector()
 
   int i;
   double ke_tensor[9];
-  double *temp_tensor;
   if (keflag) {
-    if (temperature->invoked_vector != update->ntimestep)
-      temperature->compute_vector();
-    // TODO EVK: need to make this a 3x3 tensor
-    temp_tensor = temperature->vector;
+    // if (temperature->invoked_vector != update->ntimestep)
+    temperature->compute_vector();
+    double *temp_tensor = temperature->vector;
     // The kinetic energy tensor is symmetric by definition, but we still need the full 9 elements
     // so copy them and duplicate as necessary
     for(i=0; i < 6; i++)
@@ -305,31 +291,30 @@ void ComputePressureMol::compute_vector()
 
   if (dimension == 3) {
     inv_volume = 1.0 / (domain->xprd * domain->yprd * domain->zprd);
-    // TODO: overhaul this to use molecules where appropriate
-    //virial_compute(6,3);
-    double *vmolecule = force->pair->molecule_virial;
-    double v[9];
-    MPI_Allreduce(vmolecule,v,9,MPI_DOUBLE,MPI_SUM,world);
+    virial_compute(9,3);
     if (keflag) {
       for (int i = 0; i < 9; i++)
-        vector[i] = (ke_tensor[i] + v[i]) * inv_volume * nktv2p;
+        vector[i] = (ke_tensor[i] + virial[i]) * inv_volume * nktv2p;
     } else {
       for (int i = 0; i < 9; i++)
-        vector[i] = v[i] * inv_volume * nktv2p;
+        vector[i] = virial[i] * inv_volume * nktv2p;
     }
   } else {
     inv_volume = 1.0 / (domain->xprd * domain->yprd);
-    double *vmolecule = force->pair->molecule_virial;
-    double v[9];
-    MPI_Allreduce(vmolecule,v,9,MPI_DOUBLE,MPI_SUM,world);
+    virial_compute(4,2);
 
     if (keflag) {
-      for (int i = 0; i < 9; i++)
-        vector[i] = (ke_tensor[i] + v[i]) * inv_volume * nktv2p;
+      vector[0] = (ke_tensor[0] + virial[0]) * inv_volume * nktv2p;
+      vector[1] = (ke_tensor[1] + virial[1]) * inv_volume * nktv2p;
+      vector[2] = (ke_tensor[3] + virial[3]) * inv_volume * nktv2p;
+      vector[3] = (ke_tensor[6] + virial[6]) * inv_volume * nktv2p;
     } else {
-      for (int i = 0; i < 9; i++)
-        vector[i] = v[i] * inv_volume * nktv2p;
+      vector[0] = virial[0] * inv_volume * nktv2p;
+      vector[1] = virial[1] * inv_volume * nktv2p;
+      vector[2] = virial[3] * inv_volume * nktv2p;
+      vector[3] = virial[6] * inv_volume * nktv2p;
     }
+    vector[4] = vector[5] = vector[6] = vector[7] = vector[8] = 0.0;
   }
 }
 
@@ -338,7 +323,7 @@ void ComputePressureMol::compute_vector()
 void ComputePressureMol::virial_compute(int n, int ndiag)
 {
   int i,j;
-  double v[6],*vcomponent;
+  double v[9],*vcomponent;
 
   for (i = 0; i < n; i++) v[i] = 0.0;
 
@@ -354,11 +339,13 @@ void ComputePressureMol::virial_compute(int n, int ndiag)
   MPI_Allreduce(v,virial,n,MPI_DOUBLE,MPI_SUM,world);
 
   // KSpace virial contribution is already summed across procs
+  // TODO(SS): calculate this correctly (probably need a kspace_virial_mol)
 
   if (kspace_virial)
     for (i = 0; i < n; i++) virial[i] += kspace_virial[i];
 
   // LJ long-range tail correction, only if pair contributions are included
+  // TODO(SS): Check that this is correct
 
   if (force->pair && pairflag && force->pair->tail_flag)
     for (i = 0; i < ndiag; i++) virial[i] += force->pair->ptail * inv_volume;
