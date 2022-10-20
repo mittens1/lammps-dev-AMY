@@ -969,7 +969,13 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
     }
   }
 
-  if (vflag_mol) for (int d = 0; d < 9; d++) molecule_virial[d] = 0.0;
+  if (vflag_mol) {
+    for (int d = 0; d < 9; d++)
+      molecule_virial[d] = 0.0;
+
+    // Make sure CoM is up to date
+    atom->property_molecule->com_compute();
+  }
   // run ev_setup option for TALLY computes
 
   if (num_tally_compute > 0) {
@@ -1303,7 +1309,8 @@ void Pair::ev_tally_xyz_full(int i, double evdwl, double ecoul,
       vatom[i][4] += v[4];
       vatom[i][5] += v[5];
     }
-    // Can't do full neighbour lists for now without knowing j
+    // TODO(SS): Calculate required correction factor (if possible) to
+    //           calculate molecular pressure tensor without knowing j
     // if (vflag_mol) vmol_tally_xyz_full(i, 0, fx, fy, fz);
   }
 }

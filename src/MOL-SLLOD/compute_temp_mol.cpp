@@ -251,9 +251,6 @@ void ComputeTempMol::vcm_compute(double *ke_singles)
   int *mask = atom->mask;
   int *type = atom->type;
 
-  imageint *image = atom->image;
-  double v_adjust[3];
-
   double *mass = atom->mass;
   double *rmass = atom->rmass;
   int nlocal = atom->nlocal;
