@@ -34,7 +34,6 @@ class FixNHUef : public FixNH {
   void pre_exchange() override;
   int pack_restart_data(double *) override;
   void restart(char *) override;
-  int modify_param(int, char **) override;
   void end_of_step() override;
   void initial_integrate(int) override;
   void final_integrate() override;
@@ -56,7 +55,6 @@ class FixNHUef : public FixNH {
   void inv_rotate_v(double[3][3]);
   void rotate_f(double[3][3]);
   void inv_rotate_f(double[3][3]);
-  void check_deviatoric_stress();
   double strain[2], erate[2];    // strain/strain rate : [e_x, e_y]
                                  // always assume traceless e_z = -e_x-e_y
 
