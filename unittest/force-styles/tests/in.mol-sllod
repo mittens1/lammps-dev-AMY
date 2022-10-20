@@ -14,7 +14,6 @@ bond_coeff 1 37.0 1.4 1.0 1.0
 pair_coeff 1 1 1.0 1.0 2.5
 mass 1 1.0
 
-#velocity	all create 1.0 87287 rot yes
-velocity    all ramp vx 0 8 y -0.3 12.5 sum yes
+velocity	all create 1.0 87287 rot yes mom yes
 
 reset_mol_ids all
