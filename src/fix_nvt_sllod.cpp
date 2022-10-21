@@ -144,6 +144,10 @@ void FixNVTSllod::init()
            || (def->set[3].style && def->set[3].style != ERATE))
           )
         error->warning(FLERR,"Shearing xy with a yz tilt is only handled correctly if fix deform uses the erate style for xy, xz and yz");
+      if (def->end_flag)
+        error->warning(FLERR,"SLLOD equations of motion require box deformation "
+            "to occur with position updates to be strictly correct. Set the N "
+            "parameter of fix deform to 0 to enable this.");
       break;
     }
   if (i == modify->nfix)
