@@ -35,6 +35,7 @@ class FixDeform : public Fix {
   void init() override;
   void pre_exchange() override;
   void post_integrate() override;
+  void post_integrate_respa(int, int) override;
   void end_of_step() override;
   void write_restart(FILE *) override;
   void restart(char *buf) override;
@@ -52,6 +53,15 @@ class FixDeform : public Fix {
   int kspace_flag;               // 1 if KSpace invoked, 0 if not
   std::vector<Fix *> rfix;       // pointers to rigid fixes
   class Irregular *irregular;    // for migrating atoms after box flips
+
+  int nlevels_respa;
+  double *step_respa;
+  int nloop0_respa;
+  int kspace_level_respa;
+  bigint nsteps, nsteps_total;
+  int allow_flip_change;        // For rRESPA - flip can only change in outer step
+  int need_flip_change;
+  double dt;
 
   double TWOPI;
 

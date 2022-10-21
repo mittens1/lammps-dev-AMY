@@ -178,22 +178,61 @@ void FixNVTSllod::nh_v_temp()
   int nlocal = atom->nlocal;
   if (igroup == atom->firstgroup) nlocal = atom->nfirst;
 
-  double grad_u[6],vdelu[3];
+  double grad_u[6];
   double* h_rate = domain->h_rate;
   double* h_inv = domain->h_inv;
   MathExtra::multiply_shape_shape(h_rate, h_inv, grad_u);
 
   if (peculiar) {
+    double dt4 = 0.5*dthalf;
+    double vfac[3];
+    vfac[0] = exp(-grad_u[0]*dt4);
+    vfac[1] = exp(-grad_u[1]*dt4);
+    vfac[2] = exp(-grad_u[2]*dt4);
+    if (which == BIAS) temperature->remove_bias_all();
     for (int i = 0; i < nlocal; i++) {
       if (mask[i] & groupbit) {
-        if (which == BIAS) temperature->remove_bias(i,v[i]);
-        v[i][0] = v[i][0]*factor_eta;
-        v[i][1] = v[i][1]*factor_eta;
-        v[i][2] = v[i][2]*factor_eta;
-        if (which == BIAS) temperature->restore_bias(i,v[i]);
+        if (p_sllod) {
+          // Add dt4*p-SLLOD force separately so that pure shear is identical
+          // between SLLOD and p-SLLOD. Using dt4*(SLLOD_force + p-SLLOD_force)
+          // causes numerical divergence.
+          v[i][0] *= vfac[0];
+          v[i][1] *= vfac[1];
+          v[i][2] *= vfac[2];
+          v[i][2] -= dt4*grad_u[2]*grad_u[2]*x[i][2];
+          v[i][1] -= dt4*grad_u[3]*v[i][2] + dt4*grad_u[1]*grad_u[1]*x[i][1];
+          v[i][0] -= dt4*(grad_u[5]*v[i][1] + grad_u[4]*v[i][2])
+                     + dt4*grad_u[0]*grad_u[0]*x[i][0];
+          v[i][0] *= factor_eta;
+          v[i][1] *= factor_eta;
+          v[i][2] *= factor_eta;
+          v[i][0] -= dt4*(grad_u[5]*v[i][1] + grad_u[4]*v[i][2])
+                     + dt4*grad_u[0]*grad_u[0]*x[i][0];
+          v[i][1] -= dt4*grad_u[3]*v[i][2] + dt4*grad_u[1]*grad_u[1]*x[i][1];
+          v[i][2] -= dt4*grad_u[2]*grad_u[2]*x[i][2];
+          v[i][0] *= vfac[0];
+          v[i][1] *= vfac[1];
+          v[i][2] *= vfac[2];
+        } else {
+          v[i][0] *= vfac[0];
+          v[i][1] *= vfac[1];
+          v[i][2] *= vfac[2];
+          v[i][1] -= dt4*grad_u[3]*v[i][2];
+          v[i][0] -= dt4*(grad_u[5]*v[i][1] + grad_u[4]*v[i][2]);
+          v[i][0] *= factor_eta;
+          v[i][1] *= factor_eta;
+          v[i][2] *= factor_eta;
+          v[i][0] -= dt4*(grad_u[5]*v[i][1] + grad_u[4]*v[i][2]);
+          v[i][1] -= dt4*grad_u[3]*v[i][2];
+          v[i][0] *= vfac[0];
+          v[i][1] *= vfac[1];
+          v[i][2] *= vfac[2];
+        }
       }
     }
+    if (which == BIAS) temperature->restore_bias_all();
   } else {
+    double vdelu[3];
     for (int i = 0; i < nlocal; i++) {
       if (mask[i] & groupbit) {
         if (!p_sllod) temperature->remove_bias(i,v[i]);
@@ -209,84 +248,6 @@ void FixNVTSllod::nh_v_temp()
     }
   }
 }
-
-void FixNVTSllod::nve_v()
-{
-  double dtfm, dtf2;
-  double **x = atom->x;
-  double **v = atom->v;
-  double **f = atom->f;
-  double *rmass = atom->rmass;
-  double *mass = atom->mass;
-  int *type = atom->type;
-  int *mask = atom->mask;
-  int nlocal = atom->nlocal;
-  if (igroup == atom->firstgroup) nlocal = atom->nfirst;
-
-  double grad_u[6], vfac[3];
-  double* h_rate = domain->h_rate;
-  double* h_inv = domain->h_inv;
-  MathExtra::multiply_shape_shape(h_rate, h_inv, grad_u);
-
-  if (peculiar) {
-    dtf2 = 0.5*dtf;
-    vfac[0] = exp(-grad_u[0]*dtf2);
-    vfac[1] = exp(-grad_u[1]*dtf2);
-    vfac[2] = exp(-grad_u[2]*dtf2);
-  }
-  for (int i = 0; i < nlocal; i++) {
-    if (mask[i] & groupbit) {
-      if (rmass) dtfm = dtf / rmass[i];
-      else dtfm = dtf / mass[type[i]];
-
-      if (peculiar) {
-        if (which == BIAS) temperature->remove_bias(i,v[i]);
-        if (p_sllod) {
-          // Add dtf2*p-SLLOD force separately so that pure shear is identical
-          // between SLLOD and p-SLLOD. Using dtf2*(SLLOD_force + p-SLLOD_force)
-          // causes numerical divergence.
-          v[i][0] *= vfac[0];
-          v[i][1] *= vfac[1];
-          v[i][2] *= vfac[2];
-          v[i][2] -= dtf2*grad_u[2]*grad_u[2]*x[i][2];
-          v[i][1] -= dtf2*grad_u[3]*v[i][2] + dtf2*grad_u[1]*grad_u[1]*x[i][1];
-          v[i][0] -= dtf2*(grad_u[5]*v[i][1] + grad_u[4]*v[i][2])
-                     + dtf2*grad_u[0]*grad_u[0]*x[i][0];
-          v[i][0] += dtfm*f[i][0];
-          v[i][1] += dtfm*f[i][1];
-          v[i][2] += dtfm*f[i][2];
-          v[i][0] -= dtf2*(grad_u[5]*v[i][1] + grad_u[4]*v[i][2])
-                     + dtf2*grad_u[0]*grad_u[0]*x[i][0];
-          v[i][1] -= dtf2*grad_u[3]*v[i][2] + dtf2*grad_u[1]*grad_u[1]*x[i][1];
-          v[i][2] -= dtf2*grad_u[2]*grad_u[2]*x[i][2];
-          v[i][0] *= vfac[0];
-          v[i][1] *= vfac[1];
-          v[i][2] *= vfac[2];
-        } else {
-          v[i][0] *= vfac[0];
-          v[i][1] *= vfac[1];
-          v[i][2] *= vfac[2];
-          v[i][1] -= dtf2*grad_u[3]*v[i][2];
-          v[i][0] -= dtf2*(grad_u[5]*v[i][1] + grad_u[4]*v[i][2]);
-          v[i][0] += dtfm*f[i][0];
-          v[i][1] += dtfm*f[i][1];
-          v[i][2] += dtfm*f[i][2];
-          v[i][0] -= dtf2*(grad_u[5]*v[i][1] + grad_u[4]*v[i][2]);
-          v[i][1] -= dtf2*grad_u[3]*v[i][2];
-          v[i][0] *= vfac[0];
-          v[i][1] *= vfac[1];
-          v[i][2] *= vfac[2];
-        }
-        if (which == BIAS) temperature->restore_bias(i,v[i]);
-      } else {
-        v[i][0] += dtfm*f[i][0];
-        v[i][1] += dtfm*f[i][1];
-        v[i][2] += dtfm*f[i][2];
-      }
-    }
-  }
-}
-
 
 /* ----------------------------------------------------------------------
    perform full-step update of positions

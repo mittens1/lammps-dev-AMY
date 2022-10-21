@@ -29,6 +29,7 @@
 #include "lattice.h"
 #include "math_const.h"
 #include "modify.h"
+#include "respa.h"
 #include "update.h"
 #include "variable.h"
 
@@ -52,10 +53,13 @@ irregular(nullptr), set(nullptr)
   no_change_box = 1;
   restart_global = 1;
   pre_exchange_migrate = 1;
-  end_flag = 0;
+  end_flag = 1;
+  need_flip_change = 0;
+  allow_flip_change = 1;
 
   nevery = utils::inumeric(FLERR,arg[3],false,lmp);
-  if (nevery <= 0) error->all(FLERR,"Illegal fix deform command");
+  if (nevery < 0) error->all(FLERR,"Illegal fix deform command");
+  else if (nevery == 0) end_flag = 0;
 
   // set defaults
 
@@ -386,7 +390,7 @@ int FixDeform::setmask()
   if (end_flag) mask |= END_OF_STEP;
   else {
     mask |= POST_INTEGRATE;
-    // mask |= POST_INTEGRATE_RESPA; // TODO(SS): SUPPORT RESPA
+    mask |= POST_INTEGRATE_RESPA;
   }
   return mask;
 }
@@ -678,6 +682,17 @@ void FixDeform::init()
 
   for (auto ifix : modify->get_fix_list())
     if (ifix->rigid_flag) rfix.push_back(ifix);
+
+  if (!end_flag && utils::strmatch(update->integrate_style,"^respa")) {
+    auto respa = dynamic_cast<Respa *>(update->integrate);
+    nlevels_respa = respa->nlevels;
+    step_respa = respa->step;
+    nloop0_respa = respa->loop[nlevels_respa-1];
+    kspace_level_respa = respa->level_kspace;
+    for (int iloop = nlevels_respa-2; iloop >= 0; --iloop)
+      nloop0_respa *= respa->loop[iloop];
+    allow_flip_change = 0;
+  } else allow_flip_change = 1;
 }
 
 /* ----------------------------------------------------------------------
@@ -718,11 +733,50 @@ void FixDeform::pre_exchange()
 
 // No need to check end_flag, since mask determines which of these gets called
 void FixDeform::end_of_step() {
+  nsteps = update->ntimestep - update->beginstep;
+  nsteps_total = update->endstep - update->beginstep;
+  dt = update->dt;
   update_box();
 }
 
 void FixDeform::post_integrate() {
+  nsteps = update->ntimestep - update->beginstep;
+  nsteps_total = update->endstep - update->beginstep;
+  dt = update->dt;
   update_box();
+}
+
+void FixDeform::post_integrate_respa(int ilevel, int iloop) {
+  // Update box on RESPA level 0 since that is where x updates occur
+  if (ilevel == 0) {
+    // Set correct number of timesteps and dt.
+    // This reduces the limit on the maximum number of timesteps by
+    // a factor of nloop0_respa (the total number of inner timesteps)
+    nsteps = (update->ntimestep - 1 - update->beginstep)*nloop0_respa + iloop + 1;
+    nsteps_total = (update->endstep - update->beginstep)*nloop0_respa;
+    dt = step_respa[ilevel];
+
+    // Turn off k-space flag when calling update_box() to avoid
+    // unnecessary kspace->setup() calls
+    int old_kspace_flag = kspace_flag;
+    kspace_flag = 0;
+    update_box();
+    kspace_flag = old_kspace_flag;
+
+  } else if (need_flip_change && ilevel == nlevels_respa-1) {
+    // Last step needed a box flip, so do that now. Need to flip on outer level
+    // so that reneighbouring occurs.
+    // Don't change nsteps, nsteps_total, dt since positions haven't been
+    // integrated yet.
+    allow_flip_change = 1;
+    update_box();
+    allow_flip_change = 0;
+    need_flip_change = 0;
+  }
+
+  // Box is changing every inner step, so kspace->setup() must be called
+  // on kspace level
+  if (kspace_flag && ilevel == kspace_level_respa) force->kspace->setup();
 }
 
 // Update the box
@@ -730,8 +784,8 @@ void FixDeform::update_box()
 {
   int i;
 
-  double delta = update->ntimestep - update->beginstep;
-  if (delta != 0.0) delta /= update->endstep - update->beginstep;
+  double delta = nsteps;
+  if (delta != 0.0) delta /= nsteps_total;
 
   // wrap variable evaluations with clear/add
 
@@ -749,7 +803,7 @@ void FixDeform::update_box()
       set[i].lo_target = domain->boxlo[i];
       set[i].hi_target = domain->boxhi[i];
     } else if (set[i].style == TRATE) {
-      double delt = (update->ntimestep - update->beginstep) * update->dt;
+      double delt = nsteps * dt;
       set[i].lo_target = 0.5*(set[i].lo_start+set[i].hi_start) -
         0.5*((set[i].hi_start-set[i].lo_start) * exp(set[i].rate*delt));
       set[i].hi_target = 0.5*(set[i].lo_start+set[i].hi_start) +
@@ -757,7 +811,7 @@ void FixDeform::update_box()
       h_rate[i] = set[i].rate * domain->h[i];
       h_ratelo[i] = -0.5*h_rate[i];
     } else if (set[i].style == WIGGLE) {
-      double delt = (update->ntimestep - update->beginstep) * update->dt;
+      double delt = nsteps * dt;
       set[i].lo_target = set[i].lo_start -
         0.5*set[i].amplitude * sin(TWOPI*delt/set[i].tperiod);
       set[i].hi_target = set[i].hi_start +
@@ -846,10 +900,10 @@ void FixDeform::update_box()
         else if (i == 4) set[i].tilt_target = domain->xz;
         else if (i == 3) set[i].tilt_target = domain->yz;
       } else if (set[i].style == TRATE) {
-        double delt = (update->ntimestep - update->beginstep) * update->dt;
+        double delt = nsteps * dt;
         set[i].tilt_target = set[i].tilt_start * exp(set[i].rate*delt);
       } else if (set[i].style == WIGGLE) {
-        double delt = (update->ntimestep - update->beginstep) * update->dt;
+        double delt = nsteps * dt;
         set[i].tilt_target = set[i].tilt_start +
           set[i].amplitude * sin(TWOPI*delt/set[i].tperiod);
         h_rate[i] = TWOPI/set[i].tperiod * set[i].amplitude *
@@ -862,7 +916,7 @@ void FixDeform::update_box()
         // Solve ODE for a,b,c vectors accounting for elongation caused by TRATE.
         // This is needed for SLLOD to be correct under mixed flow.
         // TODO: do other elongation styles need to be accounted for where possible?
-        double delt = (update->ntimestep - update->beginstep) * update->dt;
+        double delt = nsteps * dt;
         double arate = 0.0, brate = 0.0, h_bb;
         if (i == 3) {
           if (set[1].style == TRATE) arate = set[1].rate;
@@ -900,7 +954,7 @@ void FixDeform::update_box()
     }
 
     if (set[5].style == ERATE && set[5].rate != 0.0 && set[4].style == ERATE)
-      set[4].tilt_target += calc_xz_correction((update->ntimestep - update->beginstep) * update->dt);
+      set[4].tilt_target += calc_xz_correction(nsteps * dt);
 
     // tilt_target can be large positive or large negative value
     // add/subtract along box vectors until tilt_target is closest to current
@@ -956,45 +1010,55 @@ void FixDeform::update_box()
                                      set[4].tilt_target*xprdinv > 0.5 ||
         set[5].tilt_target*xprdinv < -0.5 ||
                                      set[5].tilt_target*xprdinv > 0.5) {
-      set[3].tilt_flip = set[3].tilt_target;
-      set[4].tilt_flip = set[4].tilt_target;
-      set[5].tilt_flip = set[5].tilt_target;
+      // For rRESPA, can only flip in outer timestep,
+      // but could be integrating in inner timestep
+      if (allow_flip_change) {
+        set[3].tilt_flip = set[3].tilt_target;
+        set[4].tilt_flip = set[4].tilt_target;
+        set[5].tilt_flip = set[5].tilt_target;
 
-      flipxy = flipxz = flipyz = 0;
+        flipxy = flipxz = flipyz = 0;
 
-      if (domain->yperiodic) {
-        if (set[3].tilt_flip*yprdinv < -0.5) {
-          set[3].tilt_flip += yprd;
-          set[4].tilt_flip += set[5].tilt_flip;
-          flipyz = 1;
-        } else if (set[3].tilt_flip*yprdinv > 0.5) {
-          set[3].tilt_flip -= yprd;
-          set[4].tilt_flip -= set[5].tilt_flip;
-          flipyz = -1;
+        if (domain->yperiodic) {
+          if (set[3].tilt_flip*yprdinv < -0.5) {
+            set[3].tilt_flip += yprd;
+            set[4].tilt_flip += set[5].tilt_flip;
+            flipyz = 1;
+          } else if (set[3].tilt_flip*yprdinv > 0.5) {
+            set[3].tilt_flip -= yprd;
+            set[4].tilt_flip -= set[5].tilt_flip;
+            flipyz = -1;
+          }
         }
+        if (domain->xperiodic) {
+          if (set[4].tilt_flip*xprdinv < -0.5) {
+            set[4].tilt_flip += xprd;
+            flipxz = 1;
+          }
+          if (set[4].tilt_flip*xprdinv > 0.5) {
+            set[4].tilt_flip -= xprd;
+            flipxz = -1;
+          }
+          if (set[5].tilt_flip*xprdinv < -0.5) {
+            set[5].tilt_flip += xprd;
+            flipxy = 1;
+          }
+          if (set[5].tilt_flip*xprdinv > 0.5) {
+            set[5].tilt_flip -= xprd;
+            flipxy = -1;
+          }
+        }
+
+        flip = 0;
+        if (flipxy || flipxz || flipyz) flip = 1;
+        if (flip) next_reneighbor = update->ntimestep + (end_flag ? 1 : 0);
+      } else {
+        // Flag to calculate new box in outer rRESPA level of next timestep.
+        need_flip_change = 1;
+
+        // No need to call modify->addstep_compute(update->ntimestep+1) since
+        // varflag can only be used with end_flag.
       }
-      if (domain->xperiodic) {
-        if (set[4].tilt_flip*xprdinv < -0.5) {
-          set[4].tilt_flip += xprd;
-          flipxz = 1;
-        }
-        if (set[4].tilt_flip*xprdinv > 0.5) {
-          set[4].tilt_flip -= xprd;
-          flipxz = -1;
-        }
-        if (set[5].tilt_flip*xprdinv < -0.5) {
-          set[5].tilt_flip += xprd;
-          flipxy = 1;
-        }
-        if (set[5].tilt_flip*xprdinv > 0.5) {
-          set[5].tilt_flip -= xprd;
-          flipxy = -1;
-        }
-      }
-
-      flip = 0;
-      if (flipxy || flipxz || flipyz) flip = 1;
-      if (flip) next_reneighbor = update->ntimestep + (end_flag ? 1 : 0);
     }
   }
 

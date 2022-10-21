@@ -33,8 +33,6 @@ class FixNVTSllodMol : public FixNH {
 
  private:
   void nh_v_temp() override;
-  void vcm_thermal_compute();
-  void nve_v() override;
   void nve_x() override;
 };
 

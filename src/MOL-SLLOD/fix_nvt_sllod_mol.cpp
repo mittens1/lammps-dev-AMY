@@ -179,6 +179,7 @@ void FixNVTSllodMol::nh_v_temp() {
   }
 
   // Use molecular centre-of-mass velocity when calculating thermostat force
+  // No need to pass ke_singles pointer since we only care about vcmall
   auto temp_mol = dynamic_cast<ComputeTempMol*>(temperature);
   temp_mol->vcm_compute();
   double **vcmall = temp_mol->vcmall;
@@ -193,106 +194,49 @@ void FixNVTSllodMol::nh_v_temp() {
   if (igroup == atom->firstgroup) nlocal = atom->nfirst;
 
   double *vcom;
+  double grad_u[6], vfac[3], vcom_new[3];
+  double* h_rate = domain->h_rate;
+  double* h_inv = domain->h_inv;
+  MathExtra::multiply_shape_shape(h_rate, h_inv, grad_u);
+
+  double dt4 = 0.5*dthalf;
+  vfac[0] = exp(-grad_u[0]*dt4);
+  vfac[1] = exp(-grad_u[1]*dt4);
+  vfac[2] = exp(-grad_u[2]*dt4);
 
   for (int i = 0; i < nlocal; i++) {
     if (mask[i] & groupbit) {
       m = molecule[i]-1;
       if (m < 0) vcom = v[i];  // CoM velocity of single atom is just v[i]
       else vcom = vcmall[m];
-      v[i][0] = v[i][0] - vcom[0] + vcom[0]*factor_eta;
-      v[i][1] = v[i][1] - vcom[1] + vcom[1]*factor_eta;
-      v[i][2] = v[i][2] - vcom[2] + vcom[2]*factor_eta;
-    }
-  }
 
-  if (which == BIAS) temperature->restore_bias_all();
-}
+      // First half step SLLOD force on CoM.
+      // Don't overwrite vcom since we may need it for multiple atoms.
+      vcom_new[0] = vcom[0]*vfac[0];
+      vcom_new[1] = vcom[1]*vfac[1];
+      vcom_new[2] = vcom[2]*vfac[2];
+      vcom_new[1] -= dt4*grad_u[3]*vcom_new[2];
+      vcom_new[0] -= dt4*(grad_u[5]*vcom_new[1] + grad_u[4]*vcom_new[2]);
 
-/* ----------------------------------------------------------------------
-   perform half-step update of peculiar velocities
------------------------------------------------------------------------*/
-
-void FixNVTSllodMol::nve_v()
-{
-  double dtfm, dtf2;
-  double **x = atom->x;
-  double **v = atom->v;
-  double **f = atom->f;
-  double *rmass = atom->rmass;
-  double *mass = atom->mass;
-  int *type = atom->type;
-  int *mask = atom->mask;
-  int nlocal = atom->nlocal;
-  if (igroup == atom->firstgroup) nlocal = atom->nfirst;
-
-  tagint *molecule = atom->molecule;
-  tagint m;
-
-  auto temp_mol = dynamic_cast<ComputeTempMol*>(temperature);
-  double **vcmall = temp_mol->vcmall;
-  double **&xcmall = atom->property_molecule->com;
-
-  double grad_u[6], vfac[3], vcom_half[3];
-  double* h_rate = domain->h_rate;
-  double* h_inv = domain->h_inv;
-  MathExtra::multiply_shape_shape(h_rate, h_inv, grad_u);
-
-  dtf2 = 0.5*dtf;
-  vfac[0] = exp(-grad_u[0]*dtf2);
-  vfac[1] = exp(-grad_u[1]*dtf2);
-  vfac[2] = exp(-grad_u[2]*dtf2);
-
-  if (which == BIAS) temperature->remove_bias_all();
-
-  // Reversible half step
-  double *vcom;
-  for (int i = 0; i < nlocal; i++) {
-    if (mask[i] & groupbit) {
-      if (rmass) dtfm = dtf / rmass[i];
-      else dtfm = dtf / mass[type[i]];
-
-      m = molecule[i]-1;
-      if (m < 0) vcom = v[i];
-      else vcom = vcmall[m];
-
-      // First half step SLLOD force on CoM
-      vcom_half[0] = vcom[0]*vfac[0];
-      vcom_half[1] = vcom[1]*vfac[1];
-      vcom_half[2] = vcom[2]*vfac[2];
-      vcom_half[1] -= dtf2*grad_u[3]*vcom_half[2];
-      vcom_half[0] -= dtf2*(grad_u[5]*vcom_half[1] + grad_u[4]*vcom_half[2]);
-
-      // Update v[i] due to SLLOD force on CoM + f[i] on atom
-      v[i][0] = v[i][0] - vcom[0] + vcom_half[0] + dtfm*f[i][0];
-      v[i][1] = v[i][1] - vcom[1] + vcom_half[1] + dtfm*f[i][1];
-      v[i][2] = v[i][2] - vcom[2] + vcom_half[2] + dtfm*f[i][2];
-    }
-  }
-
-  // Get new vcmall
-  // No need to pass ke_singles pointer since we only care about vcmall
-  temp_mol->vcm_compute();
-
-  // 2nd reversible half step
-  for (int i = 0; i < nlocal; i++) {
-    if (mask[i] & groupbit) {
-      m = molecule[i]-1;
-      if (m < 0) vcom = v[i];
-      else vcom = vcmall[m];
+      // Thermostat force
+      vcom_new[0] *= factor_eta;
+      vcom_new[1] *= factor_eta;
+      vcom_new[2] *= factor_eta;
 
       // 2nd half step SLLOD force on CoM
-      vcom_half[0] = vcom[0] - dtf2*(grad_u[5]*vcom[1] + grad_u[4]*vcom[2]);
-      vcom_half[1] = vcom[1] - dtf2*grad_u[3]*vcom[2];
-      vcom_half[2] = vcom[2]*vfac[2];
-      vcom_half[1] *= vfac[1];
-      vcom_half[0] *= vfac[0];
+      vcom_new[0] -= dt4*(grad_u[5]*vcom[1] + grad_u[4]*vcom[2]);
+      vcom_new[1] -= dt4*grad_u[3]*vcom[2];
+      vcom_new[0] *= vfac[0];
+      vcom_new[1] *= vfac[1];
+      vcom_new[2] *= vfac[2];
 
-      // Update v[i] due to SLLOD force
-      v[i][0] = v[i][0] - vcom[0] + vcom_half[0];
-      v[i][1] = v[i][1] - vcom[1] + vcom_half[1];
-      v[i][2] = v[i][2] - vcom[2] + vcom_half[2];
+      // Update atom velocity with new CoM velocity
+      v[i][0] = v[i][0] - vcom[0] + vcom_new[0];
+      v[i][1] = v[i][1] - vcom[1] + vcom_new[1];
+      v[i][2] = v[i][2] - vcom[2] + vcom_new[2];
     }
   }
+
   if (which == BIAS) temperature->restore_bias_all();
 }
 
@@ -326,6 +270,9 @@ void FixNVTSllodMol::nve_x()
   xfac[1] = exp(grad_u[1]*dtv2);
   xfac[2] = exp(grad_u[2]*dtv2);
 
+  // Calculate CoM
+  atom->property_molecule->com_compute();
+
   // First half step
   for (int i = 0; i < nlocal; i++) {
     if (mask[i] & groupbit) {
@@ -335,7 +282,7 @@ void FixNVTSllodMol::nve_x()
         // Need to remap molecular CoM to be nearest image to x[i] so that
         // streaming velocity is correct, since com stores unwrapped coords
         // This means that these equations of motion are only correct if
-        // molecules are smaller than the length of the box
+        // molecules don't extend more than half the box length from their CoM.
         molcom[0] = com[m][0];
         molcom[1] = com[m][1];
         molcom[2] = com[m][2];
