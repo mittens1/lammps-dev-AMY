@@ -17,7 +17,7 @@ reset_mol_ids all
 
 neigh_modify delay 0 every 1
 variable eps index 0.1
-fix def all deform 1 xy erate ${eps} remap none
+fix def all deform 0 xy erate ${eps} remap none
 fix sllod all nvt/sllod/mol temp 1.0 1.0 0.1
 
 fix pmol all property/molecule com
