@@ -1181,24 +1181,29 @@ double FixDeform::calc_xz_correction(double delt) {
     if (e_xx == e_zz) {
       if (e_xx == 0.0) {
         if (e_yy == 0.0) {
-          // Case 1,1: e_xx = e_yy = e_zz = 0 (Pure shear)
+          // e_xx = e_yy = e_zz = 0
+          // (Pure shear)
           return g_xy*(h_yz0*delt+0.5*g_yz*h_zz0*delt*delt);
         } else {
-          // Case 1,3: e_xx = e_zz = 0, e_yy != 0 (Shear + y extension - non vol. preserving)
+          // e_xx = e_zz = 0, e_yy != 0
+          // (Shear + y extension - non vol. preserving)
           double yyfac = (exp(e_yy*delt)-1.0)/e_yy;
           return g_xy*g_yz*h_zz0/e_yy*(yyfac - delt) + g_xy*h_yz0*yyfac;
         }
       } else {
         if(e_yy == 0.0) {
-          // Case 5,2: e_xx = e_zz != 0, e_yy = 0 (Shear + xz extension - non vol. preserving)
+          // e_xx = e_zz != 0, e_yy = 0
+          // (Shear + xz extension - non vol. preserving)
           double xfac = exp(e_xx*delt);
           return g_xy*g_yz*h_zz0/e_zz * (delt*xfac - (xfac-1.0)/e_xx)
                  + g_xy*h_yz0*((xfac-1.0)/e_xx);
         } else if (e_yy == e_zz) {
-          // Case 5,5: e_xx = e_yy = e_zz != 0 (Shear + xyz extension - non vol. preserving)
+          // e_xx = e_yy = e_zz != 0
+          // (Shear + xyz extension - non vol. preserving)
           return g_xy*(h_yz0*delt + 0.5*g_xy*g_yz*h_zz0*delt*delt)*exp(e_xx*delt);
         } else {
-          // Case 5,4: e_xx = e_zz != 0, e_yy != e_xx, e_yy != 0 (Shear + xyz extension - possibly vol. preserving)
+          // e_xx = e_zz != 0, e_yy != e_xx, e_yy != 0
+          // (Shear + xyz extension - possibly vol. preserving)
           double xfac = exp(e_xx*delt), yfac = exp(e_yy*delt);
           double xyfac = (yfac-xfac)/(e_yy-e_xx);
           return g_xy*g_yz*h_zz0/(e_zz-e_yy)*(delt*xfac-xyfac)
@@ -1207,18 +1212,18 @@ double FixDeform::calc_xz_correction(double delt) {
       }
     } else if (e_xx == 0.0) {
       if (e_yy == 0.0) {
-        // Case 2,2: e_xx = e_yy = 0, e_zz != 0
+        // e_xx = e_yy = 0, e_zz != 0
         // (Shear + z extension - non vol. preserving)
         return g_xy*g_yz*h_zz0/e_zz*((exp(e_zz*delt)-1.0)/e_zz - delt)
                + g_xy*h_yz0*delt;
       } else if (e_yy == e_zz) {
-        // Case 2,5: e_xx = 0, e_yy = e_zz != 0
+        // e_xx = 0, e_yy = e_zz != 0
         // (Shear + yz extension - non vol. preserving)
         double yfac = exp(e_yy*delt);
         return g_xy*g_yz*h_zz0/e_yy*(delt*yfac - (yfac-1.0)/e_yy)
                + g_xy*h_yz0*((yfac-1.0)/e_yy);
       } else {
-        // Case 2,4: e_xx = 0, e_yy != 0, e_zz != 0, e_yy != e_zz
+        // e_xx = 0, e_yy != 0, e_zz != 0, e_yy != e_zz
         // (Shear + yz extension - possibly vol. preserving)
         double yfac = (exp(e_yy*delt)-1.0)/e_yy;
         return g_xy*g_yz*h_zz0/(e_zz-e_yy) * ((exp(e_zz)-1.0)/e_zz - yfac)
@@ -1226,44 +1231,43 @@ double FixDeform::calc_xz_correction(double delt) {
       }
     } else if (e_zz == 0.0) {
       if (e_yy == 0.0) {
-        // Case 3,1: e_xx != 0, e_yy = e_zz = 0
+        // e_xx != 0, e_yy = e_zz = 0
         // (Shear + x extension - non vol. preserving)
         double xfac = (exp(e_xx*delt)-1.0)/e_xx;
         return g_xy*g_yz*h_zz0/e_xx*(xfac - delt) + g_xy*h_yz0*xfac;
       } else if (e_xx == e_yy) {
-        // Case 3,3.1: e_xx = e_yy != 0, e_zz = 0
+        // e_xx = e_yy != 0, e_zz = 0
         // (Shear + xy extension - non vol. preserving)
         double xfac = exp(e_xx*delt);
-        return g_xy*g_yz/e_yy*((1.0-xfac)/e_xx + delt*xfac) + g_xy*h_yz0*(delt*xfac);
+        return g_xy*g_yz/e_xx*((1.0-xfac)/e_xx + delt*xfac) + g_xy*h_yz0*(delt*xfac);
       } else {
-        // Case 3,3.2: e_xx != 0, e_yy != 0, e_xx != e_yy, e_zz = 0
+        // e_xx != 0, e_yy != 0, e_xx != e_yy, e_zz = 0
         // (Shear + xy extension - possibly vol. preserving)
         double xfac = exp(e_xx*delt), yfac = exp(e_yy*delt);
         double xyfac = (yfac-xfac)/(e_yy-e_xx);
         return g_xy*g_yz*h_zz0/e_yy * (xyfac + (1.0-xfac)/e_xx) + g_xy*h_yz0*xyfac;
       }
     } else {
-      // Case 4
       if (e_yy == 0.0) {
-        // Case 4,2: e_xx != 0, e_zz != 0, e_xx != e_zz, e_yy = 0
+        // e_xx != 0, e_zz != 0, e_xx != e_zz, e_yy = 0
         // (Shear + xz extension, possibly vol. preserving)
         double xfac = exp(e_xx*delt), zfac = exp(e_zz*delt);
         return g_xy*g_yz*h_zz0/e_zz * ((zfac-xfac)/(e_zz-e_xx) + (1.0-xfac)/e_xx)
                + g_xy*h_yz0*((1.0-xfac)/e_xx);
       } else if (e_yy == e_zz) {
-        // Case 4,5: e_xx != 0, e_yy != 0, e_zz != 0, e_xx != e_zz, e_yy = e_zz
+        // e_xx != 0, e_yy != 0, e_zz = e_yy, e_xx != e_zz
         // (Shear + xyz extension, possibly vol. preserving)
         double xfac = exp(e_xx*delt), yfac = exp(e_yy*delt);
         double xyfac = (yfac-xfac)/(e_yy-e_xx);
         return g_xy*g_yz*h_zz0/(e_yy-e_xx)*(delt*yfac - xyfac) + g_xy*h_yz0*xyfac;
       } else if (e_yy == e_xx) {
-        // Case 4,4.1: e_xx != 0, e_yy != 0, e_zz != 0, e_xx != e_zz, e_yy = e_xx
+        // e_xx != 0, e_yy = e_xx, e_zz != 0, e_xx != e_zz
         // (Shear + xyz extension, possibly vol. preserving)
         double xfac = exp(e_xx*delt), zfac = exp(e_zz*delt);
         return g_xy*g_yz*h_zz0/(e_zz-e_yy)*((zfac-xfac)/(e_zz-e_xx) - delt*xfac)
                + g_xy*h_yz0*(delt*xfac);
       } else {
-        // Case 4,4.2: e_xx != 0, e_yy != 0, e_zz != 0, e_xx != e_zz, e_yy != e_xx, e_yy != e_zz
+        // e_xx != 0, e_yy != 0, e_zz != 0, e_xx != e_zz, e_xx != e_yy, e_yy != e_zz
         // (Shear + xyz extension, possibly vol. preserving)
         double xfac=exp(e_xx*delt), yfac=exp(e_yy*delt), zfac=exp(e_zz*delt);
         double xzfac = (zfac-xfac)/(e_zz-e_xx), xyfac = (yfac-xfac)/(e_yy-e_xx);
