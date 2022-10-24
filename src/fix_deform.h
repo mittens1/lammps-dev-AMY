@@ -48,7 +48,7 @@ class FixDeform : public Fix {
   int triclinic, scaleflag, flipflag;
   int flip, flipxy, flipxz, flipyz;
   double *h_rate, *h_ratelo;
-  int end_flag;                  // 1 if box update is performed at end of step (INCORRECT DYNAMICS!)
+  int end_flag;                  // 1 if box update at end_of_step, 0 if post_integrate
   int varflag;                   // 1 if VARIABLE option is used, 0 if not
   int kspace_flag;               // 1 if KSpace invoked, 0 if not
   std::vector<Fix *> rfix;       // pointers to rigid fixes
