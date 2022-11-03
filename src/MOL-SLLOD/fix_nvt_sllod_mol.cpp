@@ -109,7 +109,7 @@ void FixNVTSllodMol::init() {
   for (i = 0; i < modify->nfix; i++)
     if (strncmp(modify->fix[i]->style,"deform",6) == 0) {
       auto def = dynamic_cast<FixDeform *>(modify->fix[i]);
-      if ((dynamic_cast<FixDeform *>( modify->fix[i]))->remapflag != Domain::NO_REMAP)
+      if (def->remapflag != Domain::NO_REMAP)
         error->all(FLERR,"Using fix nvt/sllod/mol with inconsistent fix deform "
                    "remap option");
       bool elongation = false;
@@ -139,9 +139,9 @@ void FixNVTSllodMol::init() {
         error->warning(FLERR,"Shearing xy with a yz tilt is only handled "
             "correctly if fix deform uses the erate style for xy, xz and yz");
       if (def->end_flag)
-        error->warning(FLERR,"SLLOD equations of motion require box deformation "
-            "to occur with position updates to be strictly correct. Set the N "
-            "parameter of fix deform to 0 to enable this.");
+        error->warning(FLERR,"SLLOD equations of motion require box deformation"
+            " to occur with position updates to be strictly correct. Set the N"
+            " parameter of fix deform to 0 to enable this.");
       break;
     }
   if (i == modify->nfix)
@@ -149,8 +149,8 @@ void FixNVTSllodMol::init() {
 
   // TODO(SS): maybe just register with fix property/molecule that we need COM to avoid this?
   if (atom->property_molecule == nullptr || !atom->property_molecule->com_flag)
-    error->all(FLERR, "fix nvt/sllod/mol requires a fix property/molecule to be "
-        "defined with the com option");
+    error->all(FLERR, "fix nvt/sllod/mol requires a fix property/molecule to be"
+        " defined with the com option");
 }
 
 void FixNVTSllodMol::setup(int vflag) {
@@ -159,8 +159,8 @@ void FixNVTSllodMol::setup(int vflag) {
   // Check for fix property/molecule in case it's been deleted.
   // TODO(SS): Is this needed?
   if (atom->property_molecule == nullptr || !atom->property_molecule->com_flag)
-    error->all(FLERR, "fix nvt/sllod/mol requires a fix property/molecule to be "
-        "defined with the com option");
+    error->all(FLERR, "fix nvt/sllod/mol requires a fix property/molecule to be"
+        " defined with the com option");
 }
 
 /* ----------------------------------------------------------------------
