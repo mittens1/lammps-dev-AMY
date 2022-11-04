@@ -196,7 +196,11 @@ void ComputeTempMol::dof_compute()
   //           about CoM momentum. Ignoring it for now, but maybe look
   //           into calculating the number of intermolecular constraints which
   //           should be counted.
-  // adjust_dof_fix();
+  adjust_dof_fix();
+  if (fix_dof != 0)
+    error->warning(FLERR,"Ignoring dof constraints due to fixes in compute "
+        "temp/mol. These must be accounted for manually since intramolecular "
+        "constraints should be ignored.");
 
   // Count atoms in the group that aren't part of a molecule
   int *mask = atom->mask;
