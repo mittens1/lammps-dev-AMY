@@ -192,10 +192,11 @@ void ComputeTempMol::compute_vector()
 
 void ComputeTempMol::dof_compute()
 {
-  // TODO(SS): This will be incorrect for rigid molecules, since we only care
-  //           about CoM momentum. Maybe just ignore fix_dof if it's only used
-  //           for intramolecular constraints?
-  adjust_dof_fix();
+  // TODO(SS): fix_dof will be incorrect for rigid molecules, since we only care
+  //           about CoM momentum. Ignoring it for now, but maybe look
+  //           into calculating the number of intermolecular constraints which
+  //           should be counted.
+  // adjust_dof_fix();
 
   // Count atoms in the group that aren't part of a molecule
   int *mask = atom->mask;
@@ -210,7 +211,7 @@ void ComputeTempMol::dof_compute()
   //           incorrect if not all molecules are in the group.
   dof = domain->dimension * (atom->property_molecule->nmolecule + nsingle);
 
-  dof -= extra_dof + fix_dof;
+  dof -= extra_dof; // + fix_dof;
   if (dof > 0)
     tfactor = force->mvv2e / (dof * force->boltz);
   else
