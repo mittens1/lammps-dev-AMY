@@ -77,7 +77,7 @@ ComputeTempMol::~ComputeTempMol()
 
 void ComputeTempMol::init()
 {
-  if (atom->property_molecule == nullptr || 
+  if (atom->property_molecule == nullptr ||
       !atom->property_molecule->com_flag)
     error->all(FLERR, "compute temp/deform/mol requires a fix property/molecule to be defined with the com option");
 
@@ -88,7 +88,7 @@ void ComputeTempMol::init()
 void ComputeTempMol::setup()
 {
   // Make sure fix property/molecule exists
-  if (atom->property_molecule == nullptr || 
+  if (atom->property_molecule == nullptr ||
       !atom->property_molecule->com_flag)
     error->all(FLERR, "compute temp/deform/mol requires a fix property/molecule to be defined with the com option");
 
@@ -124,7 +124,6 @@ double ComputeTempMol::compute_scalar()
   int nlocal = atom->nlocal;
   tagint m;
 
- 
   // Calculate the thermal velocity (total minus streaming) of all molecules
   double ke_singles[6];
   vcm_compute(ke_singles);
@@ -132,9 +131,9 @@ double ComputeTempMol::compute_scalar()
   // Tally up the molecule COM velocities to get the kinetic temperature
   double t = ke_singles[0]+ke_singles[1]+ke_singles[2];
   for (m = 0; m < nmolecule; m++) {
-    t += (vcmall[m][0]*vcmall[m][0] + vcmall[m][1]*vcmall[m][1] + vcmall[m][2]*vcmall[m][2]) * 
+    t += (vcmall[m][0]*vcmall[m][0] + vcmall[m][1]*vcmall[m][1] + vcmall[m][2]*vcmall[m][2]) *
           molmass[m];
-  } 
+  }
 
   // final temperature
   // TODO(SS): Check whether dynamic flag can be correctly set for cases where nmolecule can change
@@ -223,14 +222,12 @@ void ComputeTempMol::dof_compute()
 }
 
 /* ----------------------------------------------------------------------
-   calculate centre-of-mass velocity for each molecule.
+   Calculate centre-of-mass velocity for each molecule.
+   Can be safely called mid-step since doesn't set invoked flag.
   --------------------------------------------------------------------*/
 
 void ComputeTempMol::vcm_compute(double *ke_singles)
 {
-  // TODO(SS): invoked flag to avoid recalculating vcmall?
-  //           Probably best to just centralise vcmall into FPM
-
   tagint m;
   double massone;
   double unwrap[3];
@@ -296,7 +293,7 @@ void ComputeTempMol::vcm_compute(double *ke_singles)
     } else {
       vcmall[m][0] = vcmall[m][1] = vcmall[m][2] = 0.0;
     }
-  } 
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -309,6 +306,6 @@ double ComputeTempMol::memory_usage()
   // vcm and vcmall not allocated if property_molecule is nullptr
   if (atom->property_molecule != nullptr)
     bytes += (bigint) atom->property_molecule->nmolecule * 6 * sizeof(double);
-  
+
   return bytes;
 }

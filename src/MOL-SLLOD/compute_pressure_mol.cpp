@@ -22,6 +22,7 @@
 #include "domain.h"
 #include "error.h"
 #include "fix.h"
+#include "fix_property_molecule.h"
 #include "force.h"
 #include "improper.h"
 #include "kspace.h"
@@ -37,8 +38,7 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 ComputePressureMol::ComputePressureMol(LAMMPS *lmp, int narg, char **arg) :
-  Compute(lmp, narg, arg),
-  vptr(nullptr), id_temp(nullptr), pstyle(nullptr)
+  Compute(lmp, narg, arg), id_temp(nullptr)
 {
   if (narg < 4) error->all(FLERR,"Illegal compute pressure command");
   if (igroup) error->all(FLERR,"Compute pressure must use group all");
@@ -49,7 +49,6 @@ ComputePressureMol::ComputePressureMol(LAMMPS *lmp, int narg, char **arg) :
   extvector = 0;
   pressflag = 1;
   timeflag = 1;
-  pressmoleculeflag = 1;
 
   if (strcmp(arg[3],"NULL") == 0) id_temp = nullptr;
   else {
@@ -65,63 +64,23 @@ ComputePressureMol::ComputePressureMol(LAMMPS *lmp, int narg, char **arg) :
 
   // process optional args
 
-  pairhybridflag = 0;
   if (narg == 4) {
     keflag = 1;
     pairflag = 1;
-    bondflag = angleflag = dihedralflag = improperflag = 1;
-    kspaceflag = fixflag = 1;
+    kspaceflag = 1;
   } else {
     keflag = 0;
     pairflag = 0;
-    bondflag = angleflag = dihedralflag = improperflag = 0;
-    kspaceflag = fixflag = 0;
+    kspaceflag = 0;
     int iarg = 4;
     while (iarg < narg) {
       if (strcmp(arg[iarg],"ke") == 0) keflag = 1;
-      else if (strcmp(arg[iarg],"pair/hybrid") == 0) {
-        if (lmp->suffix)
-          pstyle = utils::strdup(fmt::format("{}/{}",arg[++iarg],lmp->suffix));
-        else
-          pstyle = utils::strdup(arg[++iarg]);
-
-        nsub = 0;
-
-        if (narg > iarg) {
-          if (isdigit(arg[iarg][0])) {
-            nsub = utils::inumeric(FLERR,arg[iarg],false,lmp);
-            ++iarg;
-            if (nsub <= 0)
-              error->all(FLERR,"Illegal compute pressure command");
-          }
-        }
-
-        // check if pair style with and without suffix exists
-
-        pairhybrid = (Pair *) force->pair_match(pstyle,1,nsub);
-        if (!pairhybrid && lmp->suffix) {
-          pstyle[strlen(pstyle) - strlen(lmp->suffix) - 1] = '\0';
-          pairhybrid = (Pair *) force->pair_match(pstyle,1,nsub);
-        }
-
-        if (!pairhybrid)
-          error->all(FLERR,"Unrecognized pair style in compute pressure command");
-
-        pairhybridflag = 1;
-      }
       else if (strcmp(arg[iarg],"pair") == 0) pairflag = 1;
-      else if (strcmp(arg[iarg],"bond") == 0) bondflag = 1;
-      else if (strcmp(arg[iarg],"angle") == 0) angleflag = 1;
-      else if (strcmp(arg[iarg],"dihedral") == 0) dihedralflag = 1;
-      else if (strcmp(arg[iarg],"improper") == 0) improperflag = 1;
       else if (strcmp(arg[iarg],"kspace") == 0) kspaceflag = 1;
-      else if (strcmp(arg[iarg],"fix") == 0) fixflag = 1;
       else if (strcmp(arg[iarg],"virial") == 0) {
         pairflag = 1;
-        bondflag = angleflag = dihedralflag = improperflag = 1;
-        kspaceflag = fixflag = 1;
-      } 
-      else if (strcmp(arg[iarg],"nomolvirial") == 0) pressmoleculeflag = 0;
+        kspaceflag = 1;
+      }
       else error->all(FLERR,"Illegal compute pressure command");
       iarg++;
     }
@@ -134,24 +93,46 @@ ComputePressureMol::ComputePressureMol(LAMMPS *lmp, int narg, char **arg) :
                "to include kinetic energy");
 
   vector = new double[size_vector];
-  nvirial = 0;
-  vptr = nullptr;
 }
 
 /* ---------------------------------------------------------------------- */
 
 ComputePressureMol::~ComputePressureMol()
 {
+  if (force && force->pair) force->pair->del_tally_callback(this);
   delete [] id_temp;
   delete [] vector;
-  delete [] vptr;
-  delete [] pstyle;
 }
 
 /* ---------------------------------------------------------------------- */
 
 void ComputePressureMol::init()
 {
+  if (pairflag) {
+    if (force->pair == nullptr)
+      error->all(FLERR, "Trying to use compute pressure/mol without pair style");
+    else
+      force->pair->add_tally_callback(this);
+  }
+
+  if (comm->me == 0) {
+    if (pairflag && force->pair->single_enable == 0 || force->pair->manybody_flag)
+      error->warning(FLERR,"Compute pressure/mol used with incompatible pair style");
+
+    if (kspaceflag && force->kspace)
+      error->warning(FLERR,"Compute pressure/mol does not yet handle kspace forces");
+
+    // Check for fixes that contribute to the virial (currently not handled)
+    for (auto &ifix : modify->get_fix_list())
+      if (ifix->thermo_virial)
+        error->warning(FLERR,
+            "Compute pressure/mol does not account for fix virial "
+            "contributions. This warning can be safely ignored for fixes that "
+            "only contribute intramolecular forces");
+
+  }
+  did_setup = -1;
+
   boltz = force->boltz;
   nktv2p = force->nktv2p;
   dimension = domain->dimension;
@@ -166,57 +147,17 @@ void ComputePressureMol::init()
     temperature = modify->compute[icompute];
   }
 
-  // recheck if pair style with and without suffix exists
 
-  if (pairhybridflag) {
-    pairhybrid = (Pair *) force->pair_match(pstyle,1,nsub);
-    if (!pairhybrid && lmp->suffix) {
-      strcat(pstyle,"/");
-      strcat(pstyle,lmp->suffix);
-      pairhybrid = (Pair *) force->pair_match(pstyle,1,nsub);
-    }
+  // Tally callback doesn't work with fdotr virial.
+  // Could theoretically use it for molecular virial if it existed.
 
-    if (!pairhybrid)
-      error->all(FLERR,"Unrecognized pair style in compute pressure command");
-  }
-
-  // detect contributions to virial
-  // vptr points to all molecule_virial[9] contributions
-
-  delete [] vptr;
-  nvirial = 0;
-  vptr = nullptr;
-
-  //if (pairhybridflag && force->pair) nvirial++;
-  if (pairflag && force->pair) nvirial++;
-  /*
-  if (fixflag)
-    for (auto &ifix : modify->get_fix_list())
-      if (ifix->thermo_virial) nvirial++;
-  */
-  if (nvirial) {
-    vptr = new double*[nvirial];
-    nvirial = 0;
-    /*
-    if (pairhybridflag && force->pair) {
-      auto ph = dynamic_cast<PairHybrid *>( force->pair);
-      ph->no_virial_fdotr_compute = 1;
-      vptr[nvirial++] = pairhybrid->virial;
-    }
-    */
-    if (pairflag && force->pair) vptr[nvirial++] = force->pair->molecule_virial;
-    /*
-    if (fixflag)
-      for (auto &ifix : modify->get_fix_list())
-        if (ifix->virial_global_flag && ifix->thermo_virial)
-            vptr[nvirial++] = ifix->virial;
-    */
-  }
+  if (pairflag) force->pair->no_virial_fdotr_compute = 1;
 
   // flag Kspace contribution separately, since not summed across procs
 
   if (kspaceflag && force->kspace) kspace_virial = force->kspace->virial;
   else kspace_virial = nullptr;
+
 }
 
 /* ----------------------------------------------------------------------
@@ -226,7 +167,7 @@ void ComputePressureMol::init()
 double ComputePressureMol::compute_scalar()
 {
   invoked_scalar = update->ntimestep;
-  if (update->vflag_global != invoked_scalar)
+  if (did_setup != invoked_scalar || update->vflag_global != invoked_scalar)
     error->all(FLERR,"Virial was not tallied on needed timestep");
 
   // invoke temperature if it hasn't been already
@@ -265,23 +206,24 @@ double ComputePressureMol::compute_scalar()
 void ComputePressureMol::compute_vector()
 {
   invoked_vector = update->ntimestep;
-  if (update->vflag_global != invoked_vector)
+  if (did_setup != invoked_vector || update->vflag_global != invoked_vector)
     error->all(FLERR,"Virial was not tallied on needed timestep");
 
   if (force->kspace && kspace_virial && force->kspace->scalar_pressure_flag)
     error->all(FLERR,"Must use 'kspace_modify pressure/scalar no' for "
                "tensor components with kspace_style msm");
 
-  // invoke temperature if it hasn't been already
-
   int i;
   double ke_tensor[9];
   if (keflag) {
-    // if (temperature->invoked_vector != update->ntimestep)
-    temperature->compute_vector();
-    double *temp_tensor = temperature->vector;
-    // The kinetic energy tensor is symmetric by definition, but we still need the full 9 elements
+    // invoke temperature if it hasn't been already
+    if (temperature->invoked_vector != update->ntimestep)
+      temperature->compute_vector();
+
+    // The kinetic energy tensor is symmetric by definition,
+    // but we still need the full 9 elements,
     // so copy them and duplicate as necessary
+    double *temp_tensor = temperature->vector;
     for(i=0; i < 6; i++)
       ke_tensor[i] = temp_tensor[i];
     ke_tensor[6] = temp_tensor[3];
@@ -327,12 +269,10 @@ void ComputePressureMol::virial_compute(int n, int ndiag)
 
   for (i = 0; i < n; i++) v[i] = 0.0;
 
-  // sum contributions to virial from forces and fixes
+  // sum contributions to virial from pair forces
 
-  for (j = 0; j < nvirial; j++) {
-    vcomponent = vptr[j];
-    for (i = 0; i < n; i++) v[i] += vcomponent[i];
-  }
+  if (pairflag)
+    for (i = 0; i < n; i++) v[i] += pair_virial[i];
 
   // sum virial across procs
 
@@ -357,4 +297,113 @@ void ComputePressureMol::reset_extra_compute_fix(const char *id_new)
 {
   delete [] id_temp;
   id_temp = utils::strdup(id_new);
+}
+
+void ComputePressureMol::pair_setup_callback(int eflag, int vflag) {
+  if (did_setup == update->ntimestep || !matchstep(update->ntimestep)) return;
+  did_setup = update->ntimestep;
+
+  for (int d = 0; d < 9; d++)
+    pair_virial[d] = 0.0;
+
+  // Make sure CoM is up to date
+  if (atom->property_molecule->comstep != update->ntimestep)
+    atom->property_molecule->com_compute();
+}
+
+/* ----------------------------------------------------------------------
+   tally molecular virials into global accumulator
+   have delx, dely, delz and fpair (which gives fx, fy, fz)
+   get delcomx, delcomy, delcomz (molecule centre-of-mass separation)
+   from atom->property_molecule
+------------------------------------------------------------------------- */
+
+void ComputePressureMol::pair_tally_callback(int i, int j, int nlocal,
+    int newton_pair, double evdwl, double ecoul, double fpair,
+    double delx, double dely, double delz)
+{
+  // Virial does not need to be tallied if we didn't do setup this step
+  if (did_setup != update->ntimestep) return;
+
+  if (atom->property_molecule == nullptr ||
+      !atom->property_molecule->com_flag)
+    error->all(FLERR, "calculation of the molecular virial requires a fix property/molecule to be defined with the com option");
+
+  double delcom[3], v[9];
+  double **com = atom->property_molecule->com;
+
+  tagint mol_i = atom->molecule[i]-1;
+  tagint mol_j = atom->molecule[j]-1;
+
+  // com is stored in unwrapped coordinates, so need to map near each other
+  // NOTE: this assumes that an atom is always closer to the CoM of the
+  //       molecule it belongs to than to any image of that CoM. This may not
+  //       hold for molecules that are longer than half the box length.
+  // TODO(SS): This can probably be fixed by attaching image flags to CoM coords.
+  double *com_i, *com_j, com_tmp_i[3], com_tmp_j[3];
+  if (mol_i < 0) com_i = atom->x[i];
+  else {
+    com_tmp_i[0] = com[mol_i][0];
+    com_tmp_i[1] = com[mol_i][1];
+    com_tmp_i[2] = com[mol_i][2];
+    domain->remap_near(com_tmp_i, atom->x[i]);
+    com_i = com_tmp_i;
+  }
+  if (mol_j < 0) com_j = atom->x[j];
+  else {
+    com_tmp_j[0] = com[mol_j][0];
+    com_tmp_j[1] = com[mol_j][1];
+    com_tmp_j[2] = com[mol_j][2];
+    domain->remap_near(com_tmp_j, atom->x[j]);
+    com_j = com_tmp_j;
+  }
+
+  for (int d = 0; d < 3; d++) {
+    delcom[d] = com_i[d] - com_j[d];
+  }
+
+  v[0] = delcom[0]*delx*fpair;
+  v[1] = delcom[1]*dely*fpair;
+  v[2] = delcom[2]*delz*fpair;
+  v[3] = delcom[0]*dely*fpair;
+  v[4] = delcom[0]*delz*fpair;
+  v[5] = delcom[1]*delz*fpair;
+  v[6] = delcom[1]*delx*fpair;
+  v[7] = delcom[2]*delx*fpair;
+  v[8] = delcom[2]*dely*fpair;
+
+  if (newton_pair) {
+    pair_virial[0] += v[0];
+    pair_virial[1] += v[1];
+    pair_virial[2] += v[2];
+    pair_virial[3] += v[3];
+    pair_virial[4] += v[4];
+    pair_virial[5] += v[5];
+    pair_virial[6] += v[6];
+    pair_virial[7] += v[7];
+    pair_virial[8] += v[8];
+  } else {
+    if (i < nlocal) {
+      pair_virial[0] += 0.5*v[0];
+      pair_virial[1] += 0.5*v[1];
+      pair_virial[2] += 0.5*v[2];
+      pair_virial[3] += 0.5*v[3];
+      pair_virial[4] += 0.5*v[4];
+      pair_virial[5] += 0.5*v[5];
+      pair_virial[6] += 0.5*v[6];
+      pair_virial[7] += 0.5*v[7];
+      pair_virial[8] += 0.5*v[8];
+    }
+    if (j < nlocal) {
+      pair_virial[0] += 0.5*v[0];
+      pair_virial[1] += 0.5*v[1];
+      pair_virial[2] += 0.5*v[2];
+      pair_virial[3] += 0.5*v[3];
+      pair_virial[4] += 0.5*v[4];
+      pair_virial[5] += 0.5*v[5];
+      pair_virial[6] += 0.5*v[6];
+      pair_virial[7] += 0.5*v[7];
+      pair_virial[8] += 0.5*v[8];
+    }
+  }
 }

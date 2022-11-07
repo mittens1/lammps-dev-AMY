@@ -62,7 +62,7 @@ Update::Update(LAMMPS *lmp) : Pointers(lmp)
   setupflag = 0;
   multireplica = 0;
 
-  eflag_global = vflag_global = vflag_mol = -1;
+  eflag_global = vflag_global = -1;
   eflag_atom = vflag_atom = 0;
 
   dt_default = 1;
@@ -509,7 +509,7 @@ void Update::reset_timestep(bigint newstep, bool do_check)
 
   // reset eflag/vflag global so no commands will think eng/virial are current
 
-  eflag_global = vflag_global = vflag_mol = -1;
+  eflag_global = vflag_global = -1;
 
   // reset invoked flags of computes, so no commands will think they are current between runs
   // clear timestep list of computes that store future invocation times

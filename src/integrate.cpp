@@ -30,7 +30,7 @@ using namespace LAMMPS_NS;
 Integrate::Integrate(LAMMPS *lmp, int /*narg*/, char ** /*arg*/) : Pointers(lmp)
 {
   elist_global = elist_atom = nullptr;
-  vlist_global = vlist_atom = cvlist_atom = vlist_mol = nullptr;
+  vlist_global = vlist_atom = cvlist_atom = nullptr;
   external_force_clear = 0;
 }
 
@@ -43,7 +43,6 @@ Integrate::~Integrate()
   delete [] vlist_global;
   delete [] vlist_atom;
   delete [] cvlist_atom;
-  delete [] vlist_mol;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -80,19 +79,17 @@ void Integrate::ev_setup()
   delete [] vlist_global;
   delete [] vlist_atom;
   delete [] cvlist_atom;
-  delete [] vlist_mol;
   elist_global = elist_atom = nullptr;
-  vlist_global = vlist_atom = cvlist_atom = vlist_mol = nullptr;
+  vlist_global = vlist_atom = cvlist_atom = nullptr;
 
   nelist_global = nelist_atom = 0;
-  nvlist_global = nvlist_atom = ncvlist_atom = nvlist_mol = 0;
+  nvlist_global = nvlist_atom = ncvlist_atom = 0;
   for (int i = 0; i < modify->ncompute; i++) {
     if (modify->compute[i]->peflag) nelist_global++;
     if (modify->compute[i]->peatomflag) nelist_atom++;
     if (modify->compute[i]->pressflag) nvlist_global++;
     if (modify->compute[i]->pressatomflag & 1) nvlist_atom++;
     if (modify->compute[i]->pressatomflag & 2) ncvlist_atom++;
-    if (modify->compute[i]->pressmoleculeflag) nvlist_mol++;
   }
 
   if (nelist_global) elist_global = new Compute*[nelist_global];
@@ -100,10 +97,9 @@ void Integrate::ev_setup()
   if (nvlist_global) vlist_global = new Compute*[nvlist_global];
   if (nvlist_atom) vlist_atom = new Compute*[nvlist_atom];
   if (ncvlist_atom) cvlist_atom = new Compute*[ncvlist_atom];
-  if (nvlist_mol) vlist_mol = new Compute*[nvlist_mol];
 
   nelist_global = nelist_atom = 0;
-  nvlist_global = nvlist_atom = ncvlist_atom = nvlist_mol = 0;
+  nvlist_global = nvlist_atom = ncvlist_atom = 0;
   for (int i = 0; i < modify->ncompute; i++) {
     if (modify->compute[i]->peflag)
       elist_global[nelist_global++] = modify->compute[i];
@@ -115,8 +111,6 @@ void Integrate::ev_setup()
       vlist_atom[nvlist_atom++] = modify->compute[i];
     if (modify->compute[i]->pressatomflag & 2)
       cvlist_atom[ncvlist_atom++] = modify->compute[i];
-    if (modify->compute[i]->pressmoleculeflag)
-      vlist_mol[nvlist_mol++] = modify->compute[i];
   }
 }
 
@@ -137,7 +131,6 @@ void Integrate::ev_setup()
      VIRIAL_FDOTR    bit for global virial via F dot r
      VIRIAL_ATOM     bit for per-atom virial
      VIRIAL_CENTROID bit for per-atom centroid virial
-     VIRIAL_MOL      bit for global molecular virial as sum of pairwise terms
    all force components (pair,bond,angle,...,kspace) use eflag/vflag
      in their ev_setup() method to set local energy/virial flags
 ------------------------------------------------------------------------- */
@@ -184,14 +177,7 @@ void Integrate::ev_set(bigint ntimestep)
     if (cvlist_atom[i]->matchstep(ntimestep)) flag = 1;
   if (flag || (tdflag && ncvlist_atom)) cvflag_atom = VIRIAL_CENTROID;
 
-  flag = 0;
-  int vflag_mol = 0;
-  for (i = 0; i < nvlist_mol; i++)
-    if (vlist_mol[i]->matchstep(ntimestep)) flag = 1;
-  if (flag || (tdflag && nvlist_mol)) vflag_mol = VIRIAL_MOL;
-  
   if (vflag_global) update->vflag_global = ntimestep;
   if (vflag_atom || cvflag_atom) update->vflag_atom = ntimestep;
-  if (vflag_mol) update->vflag_mol = ntimestep;
-  vflag = vflag_global + vflag_atom + cvflag_atom + vflag_mol;
+  vflag = vflag_global + vflag_atom + cvflag_atom;
 }

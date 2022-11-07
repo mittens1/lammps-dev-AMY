@@ -285,19 +285,9 @@ class Pair : protected Pointers {
                     double);
   void v_tally2(int, int, double, double *);
   void v_tally_tensor(int, int, int, int, double, double, double, double, double, double);
-
-  void vmol_tally(int, int, int, int, double, double, double, double);
-  void vmol_tally_xyz(int, int, int, int, double, double, double);
-
   void virial_fdotr_compute();
 
   inline int sbmask(int j) const { return j >> SBBITS & 3; }
-
- public:
-  double molecule_virial[9];             // Accumulated molecular virial
-  int vflag_mol;
-
-
 };
 
 }    // namespace LAMMPS_NS

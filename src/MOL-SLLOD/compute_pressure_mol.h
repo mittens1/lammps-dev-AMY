@@ -32,25 +32,25 @@ class ComputePressureMol : public Compute {
   double compute_scalar() override;
   void compute_vector() override;
   void reset_extra_compute_fix(const char *) override;
+  void pair_setup_callback(int, int) override;
+  void pair_tally_callback(int, int, int, int,
+      double, double, double, double, double, double) override;
 
  protected:
   double boltz, nktv2p, inv_volume;
-  int nvirial, dimension;
-  double **vptr;
+  int dimension;
   double *kspace_virial;
   Compute *temperature;
   char *id_temp;
   double virial[9];    // ordering: xx,yy,zz,xy,xz,yz,yx,zx,zy
-  int pairhybridflag;
-  class Pair *pairhybrid;
-  int keflag, pairflag, bondflag, angleflag, dihedralflag, improperflag;
-  int fixflag, kspaceflag;
+  double pair_virial[9];
+  int keflag, pairflag;
+  int kspaceflag;
 
   void virial_compute(int, int);
 
  private:
-  char *pstyle;
-  int nsub;
+  bigint did_setup;
 };
 
 }    // namespace LAMMPS_NS

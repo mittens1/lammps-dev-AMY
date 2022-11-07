@@ -165,7 +165,7 @@ void FixPropertyMolecule::grow_permolecule() {
   if (maxall > MAXSMALLINT)
     error->all(FLERR, "Molecule IDs too large for fix property/molecule");
   nmolecule = maxall;
-  
+
   // Grow arrays as needed
   if (nmax < nmolecule) {
     nmax = nmolecule;
@@ -331,7 +331,7 @@ void FixPropertyMolecule::mem_grow(PerMolecule &item) {
 
 template<typename T> inline
 void FixPropertyMolecule::mem_destroy_impl(PerMolecule &item) {
-  if (item.cols == 0) 
+  if (item.cols == 0)
     memory->destroy(*(T**)item.address);
   else if (item.cols > 0)
     memory->destroy(*(T***)item.address);

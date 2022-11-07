@@ -276,7 +276,7 @@ void FixNVTSllod::nve_x()
   if (igroup == atom->firstgroup) nlocal = atom->nfirst;
 
   // x update by full step only for atoms in group
-  
+
   if (peculiar) {
     double* h_rate = domain->h_rate;
     double* h_inv = domain->h_inv;
@@ -310,4 +310,3 @@ void FixNVTSllod::nve_x()
     }
   }
 }
-

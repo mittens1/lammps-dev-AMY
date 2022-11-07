@@ -266,7 +266,7 @@ void FixNVTSllodMol::nve_x()
   if (igroup == atom->firstgroup) nlocal = atom->nfirst;
 
   // x update by full step only for atoms in group
-  
+
   double* h_rate = domain->h_rate;
   double* h_inv = domain->h_inv;
   MathExtra::multiply_shape_shape(h_rate, h_inv, grad_u);
