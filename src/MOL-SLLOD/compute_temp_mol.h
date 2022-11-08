@@ -35,9 +35,13 @@ class ComputeTempMol : public Compute {
 
   double memory_usage() override;
 
-  // TODO(SS): centralise vcm_compute() to fix property/molecule?
+  // TODO(SS): centralise vcm_compute() to fix property/mol?
   void vcm_compute(double *ke_singles = nullptr);
   double **vcmall;
+
+ protected:
+  char *id_molprop;
+  class FixPropertyMol *molprop;
 
  private:
   int nmax;

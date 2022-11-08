@@ -1,3 +1,4 @@
+echo screen
 units           lj
 timestep        0.001
 atom_style      full
@@ -18,12 +19,12 @@ reset_mol_ids all
 neigh_modify delay 0 every 1
 variable eps index 0.1
 fix def all deform 0 xy erate ${eps} remap none
-fix sllod all nvt/sllod/mol temp 1.0 1.0 0.1
+fix sllod all nvt/sllod/mol temp 1.0 1.0 0.1 molprop pmol
 
-fix pmol all property/molecule com
+fix pmol all property/mol com
 
 # Antisymmetric components of the molecular pressure temperature
-compute molpress all pressure/mol sllod_temp
+compute molpress all pressure/mol pmol sllod_temp
 variable apress0 equal "0.5*(c_molpress[4] - c_molpress[7])"
 variable apress1 equal "0.5*(c_molpress[5] - c_molpress[8])"
 variable apress2 equal "0.5*(c_molpress[6] - c_molpress[9])"
@@ -60,4 +61,4 @@ thermo_modify norm no
 
 # fix av all ave/time 1 1 1 v_Etot v_Edot_sllod v_Edot_alpha v_Edot_expected file energy_dissipation.csv
 
-run 5000
+run 1 #5000

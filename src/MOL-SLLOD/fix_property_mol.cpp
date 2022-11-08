@@ -11,7 +11,7 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "fix_property_molecule.h"
+#include "fix_property_mol.h"
 
 #include "atom.h"
 #include "domain.h"
@@ -27,7 +27,7 @@ using namespace FixConst;
 
 /* ---------------------------------------------------------------------- */
 
-FixPropertyMolecule::FixPropertyMolecule(LAMMPS *lmp, int narg, char **arg) :
+FixPropertyMol::FixPropertyMol(LAMMPS *lmp, int narg, char **arg) :
     Fix(lmp, narg, arg), mass(nullptr), com(nullptr), massproc(nullptr),
     comproc(nullptr)
 {
@@ -53,19 +53,15 @@ FixPropertyMolecule::FixPropertyMolecule(LAMMPS *lmp, int narg, char **arg) :
   nmax = 0;
   nmolecule = 1;
 
-  if (atom->property_molecule != nullptr)
-    error->all(FLERR, "Illegal redefinition of fix property/molecule");
-  atom->property_molecule = this;
-
   comstep = -1;
 
   if (mass_flag) {
-    register_permolecule("property/molecule:mass", &mass, Atom::DOUBLE, 0);
-    register_permolecule("property/molecule:massproc", &massproc, Atom::DOUBLE, 0);
+    register_permolecule("property/mol:mass", &mass, Atom::DOUBLE, 0);
+    register_permolecule("property/mol:massproc", &massproc, Atom::DOUBLE, 0);
   }
   if (com_flag)  {
-    register_permolecule("property/molecule:com", &com, Atom::DOUBLE, 3);
-    register_permolecule("property/molecule:comproc", &comproc, Atom::DOUBLE, 3);
+    register_permolecule("property/mol:com", &com, Atom::DOUBLE, 3);
+    register_permolecule("property/mol:comproc", &comproc, Atom::DOUBLE, 3);
   }
 
   array_flag = 1;
@@ -75,15 +71,14 @@ FixPropertyMolecule::FixPropertyMolecule(LAMMPS *lmp, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-FixPropertyMolecule::~FixPropertyMolecule()
+FixPropertyMol::~FixPropertyMol()
 {
-  atom->property_molecule = nullptr;
   for (auto &item : permolecule) mem_destroy(item);
 }
 
 /* ---------------------------------------------------------------------- */
 
-int FixPropertyMolecule::setmask()
+int FixPropertyMol::setmask()
 {
   int mask = 0;
   mask |= PRE_FORCE;
@@ -91,9 +86,17 @@ int FixPropertyMolecule::setmask()
   return mask;
 }
 
-/* ---------------------------------------------------------------------- */
+/* ----------------------------------------------------------------------
+   allocate a per-molecule array which will be grown automatically.
+   This should be called with the *address* of the pointer to the
+   allocated memory:
 
-void FixPropertyMolecule::register_permolecule( std::string name, void *address,
+   double *arr;
+   register_permolecule("arr", &arr, Atom::DOUBLE, 0);
+   destroy_permolecule(&arr);
+---------------------------------------------------------------------- */
+
+void FixPropertyMol::register_permolecule(std::string name, void *address,
     int datatype, int cols) {
   if (address == nullptr) return;
 
@@ -107,7 +110,15 @@ void FixPropertyMolecule::register_permolecule( std::string name, void *address,
   }
 }
 
-void FixPropertyMolecule::destroy_permolecule(void *address) {
+/* ----------------------------------------------------------------------
+   de-allocate a per-molecule array. This should be called with the
+   *address* of the pointer to the allocated memory:
+
+   double *arr;
+   register_permolecule("arr", &arr, Atom::DOUBLE, 0);
+   destroy_permolecule(&arr);
+---------------------------------------------------------------------- */
+void FixPropertyMol::destroy_permolecule(void *address) {
   auto item = permolecule.begin();
   while (item != permolecule.end()) {
     if (item->address == address) {
@@ -119,16 +130,17 @@ void FixPropertyMolecule::destroy_permolecule(void *address) {
 
 /* ---------------------------------------------------------------------- */
 
-void FixPropertyMolecule::init()
+void FixPropertyMol::init()
 {
   // Error if system doesn't track molecule ids.
   // Check here since atom_style could change before run.
 
   if (!atom->molecule_flag)
-    error->all(FLERR, "Fix property/molecule when atom_style does not define a molecule attribute");
+    error->all(FLERR,
+        "Fix property/mol when atom_style does not define a molecule attribute");
 }
 
-void FixPropertyMolecule::setup_pre_force(int vflag) {
+void FixPropertyMol::setup_pre_force(int vflag) {
 
   // This assumes number of molecules won't change during a run
   // If something like fix gcmc could change this, maybe add a flag for that?
@@ -140,7 +152,7 @@ void FixPropertyMolecule::setup_pre_force(int vflag) {
   if (com_flag) com_compute();
 }
 
-void FixPropertyMolecule::setup_pre_force_respa(int vflag, int ilevel) {
+void FixPropertyMol::setup_pre_force_respa(int vflag, int ilevel) {
 
   // TODO: Any reason to check other levels for new number of molecules?
   if (ilevel == 0) setup_pre_force(vflag);
@@ -150,7 +162,7 @@ void FixPropertyMolecule::setup_pre_force_respa(int vflag, int ilevel) {
    Calculate number of molecules and grow permolecule arrays if needed
 ------------------------------------------------------------------------- */
 
-void FixPropertyMolecule::grow_permolecule() {
+void FixPropertyMol::grow_permolecule() {
   // Calculate number of molecules
   // TODO: maybe take an input value for how much to grow by,
   //       or 0 if nmolecule should be calculated?
@@ -163,7 +175,7 @@ void FixPropertyMolecule::grow_permolecule() {
   tagint maxall;
   MPI_Allreduce(&maxone, &maxall, 1, MPI_LMP_TAGINT, MPI_MAX, world);
   if (maxall > MAXSMALLINT)
-    error->all(FLERR, "Molecule IDs too large for fix property/molecule");
+    error->all(FLERR, "Molecule IDs too large for fix property/mol");
   nmolecule = maxall;
 
   // Grow arrays as needed
@@ -183,7 +195,7 @@ void FixPropertyMolecule::grow_permolecule() {
    Update total mass of each molecule
 ------------------------------------------------------------------------- */
 
-void FixPropertyMolecule::mass_compute() {
+void FixPropertyMol::mass_compute() {
   if (nmolecule == 0) return;
   double massone;
   for (tagint m = 0; m < nmolecule; ++m)
@@ -204,20 +216,20 @@ void FixPropertyMolecule::mass_compute() {
    molecular virial
 ------------------------------------------------------------------------- */
 
-void FixPropertyMolecule::pre_force(int vflag) {
+void FixPropertyMol::pre_force(int vflag) {
 
   // NOTE: This is quite specific to COM. Probably best to add a general
   // framework in future to handle where in the run each per-molecule
   // vector/array should be recalculated, and to combine the tallying and MPI
   // communication where possible
-  // Alternatively, property/molecule could just handle memory allocation, and
+  // Alternatively, property/mol could just handle memory allocation, and
   // let other code do the actual calculation
   if (com_flag) com_compute();
 }
 
 // TODO: Not sure how often this actually needs to be called, or if there are
 // smart performance things we could do
-void FixPropertyMolecule::pre_force_respa(int vflag, int /*ilevel*/, int /*iloop*/) {
+void FixPropertyMol::pre_force_respa(int vflag, int /*ilevel*/, int /*iloop*/) {
   pre_force(vflag);
 }
 
@@ -225,7 +237,7 @@ void FixPropertyMolecule::pre_force_respa(int vflag, int /*ilevel*/, int /*iloop
    Calculate center of mass of each molecule in unwrapped coords
 ------------------------------------------------------------------------- */
 
-void FixPropertyMolecule::com_compute() {
+void FixPropertyMol::com_compute() {
   comstep = update->ntimestep;
   if (nmolecule == 0) return; // Prevent segfault if no molecules exit
 
@@ -277,7 +289,7 @@ void FixPropertyMolecule::com_compute() {
    memory usage of local atom-based array
 ------------------------------------------------------------------------- */
 
-double FixPropertyMolecule::memory_usage()
+double FixPropertyMol::memory_usage()
 {
   double bytes = 0.0;
   if (mass_flag) bytes += nmax * sizeof(double);
@@ -289,10 +301,12 @@ double FixPropertyMolecule::memory_usage()
    basic array output, almost no error checking
 ------------------------------------------------------------------------- */
 
-double FixPropertyMolecule::compute_array(int imol, int col)
+double FixPropertyMol::compute_array(int imol, int col)
 {
   if (imol > static_cast<int>(nmolecule))
-    error->all(FLERR, fmt::format("Cannot request info for molecule {} from fix/property/molecule (nmolecule = {})", imol, nmolecule));
+    error->all(FLERR, fmt::format(
+      "Cannot request info for molecule {} from fix property/mol (nmolecule = {})",
+      imol, nmolecule));
   if (col == 3) return mass[imol];
   else return com[imol][col];
 }
@@ -302,13 +316,13 @@ double FixPropertyMolecule::compute_array(int imol, int col)
 ------------------------------------------------------------------------- */
 
 template<typename T> inline
-void FixPropertyMolecule::mem_create_impl(PerMolecule &item) {
+void FixPropertyMol::mem_create_impl(PerMolecule &item) {
   if (item.cols == 0)
     memory->create(*(T**)item.address, nmax, item.name.c_str());
   else if (item.cols > 0)
     memory->create(*(T***)item.address, nmax, item.cols, item.name.c_str());
 }
-void FixPropertyMolecule::mem_create(PerMolecule &item) {
+void FixPropertyMol::mem_create(PerMolecule &item) {
 
   if      (item.datatype == Atom::DOUBLE) mem_create_impl<double>(item);
   else if (item.datatype == Atom::INT)    mem_create_impl<int>(item);
@@ -317,26 +331,26 @@ void FixPropertyMolecule::mem_create(PerMolecule &item) {
 }
 
 template<typename T> inline
-void FixPropertyMolecule::mem_grow_impl(PerMolecule &item) {
+void FixPropertyMol::mem_grow_impl(PerMolecule &item) {
   if (item.cols == 0)
     memory->grow(*(T**)item.address, nmax, item.name.c_str());
   else if (item.cols > 0)
     memory->grow(*(T***)item.address, nmax, item.cols, item.name.c_str());
 }
-void FixPropertyMolecule::mem_grow(PerMolecule &item) {
+void FixPropertyMol::mem_grow(PerMolecule &item) {
   if      (item.datatype == Atom::DOUBLE) mem_grow_impl<double>(item);
   else if (item.datatype == Atom::INT)    mem_grow_impl<int>(item);
   else if (item.datatype == Atom::BIGINT) mem_grow_impl<bigint>(item);
 }
 
 template<typename T> inline
-void FixPropertyMolecule::mem_destroy_impl(PerMolecule &item) {
+void FixPropertyMol::mem_destroy_impl(PerMolecule &item) {
   if (item.cols == 0)
     memory->destroy(*(T**)item.address);
   else if (item.cols > 0)
     memory->destroy(*(T***)item.address);
 }
-void FixPropertyMolecule::mem_destroy(PerMolecule &item) {
+void FixPropertyMol::mem_destroy(PerMolecule &item) {
   if      (item.datatype == Atom::DOUBLE) mem_destroy_impl<double>(item);
   else if (item.datatype == Atom::INT)    mem_destroy_impl<int>(item);
   else if (item.datatype == Atom::BIGINT) mem_destroy_impl<bigint>(item);

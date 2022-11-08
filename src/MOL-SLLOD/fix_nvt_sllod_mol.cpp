@@ -24,7 +24,7 @@
 #include "domain.h"
 #include "error.h"
 #include "fix_deform.h"
-#include "fix_property_molecule.h"
+#include "fix_property_mol.h"
 #include "group.h"
 #include "math_extra.h"
 #include "modify.h"
@@ -43,12 +43,24 @@ enum{NONE=0,FINAL,DELTA,SCALE,VEL,ERATE,TRATE,VOLUME,WIGGLE,VARIABLE};
 /* ---------------------------------------------------------------------- */
 
 FixNVTSllodMol::FixNVTSllodMol(LAMMPS *lmp, int narg, char **arg) :
-  FixNH(lmp, narg, arg)
+  FixNH(lmp, narg, arg), molprop(nullptr), id_molprop(nullptr)
 {
+  molpropflag = 1;
+
   if (!tstat_flag)
     error->all(FLERR,"Temperature control must be used with fix nvt/sllod/mol");
   if (pstat_flag)
     error->all(FLERR,"Pressure control can not be used with fix nvt/sllod/mol");
+
+  for (int iarg = 0; iarg < narg; ++iarg) {
+    if (strcmp(arg[iarg], "molprop")==0) {
+      if (iarg+1 >= narg)
+        error->all(FLERR,"Expected name of property/molecule fix after 'molprop'");
+      id_molprop = utils::strdup(arg[iarg+1]);
+      molpropflag = 0;
+      iarg += 2;
+    }
+  }
 
   // default values
 
@@ -77,25 +89,40 @@ FixNVTSllodMol::FixNVTSllodMol(LAMMPS *lmp, int narg, char **arg) :
     size_vector -= 2*2*(3-mtchain);
   }
 
-  // create a new compute temp style
-  // id = fix-ID + temp
+  // create a new fix property/mol if needed
+  // id = fix-ID + _molprop
+  if (molpropflag) {
+    id_molprop = utils::strdup(std::string(id) + "_molprop");
+  }
 
+  // create a new compute temp style
+  // id = fix-ID + _temp
   id_temp = utils::strdup(std::string(id) + "_temp");
-  modify->add_compute(fmt::format("{} {} temp/mol",
-                                  id_temp,group->names[igroup]));
+  modify->add_compute(fmt::format("{} {} temp/mol {}",
+                      id_temp, group->names[igroup], id_molprop));
   tcomputeflag = 1;
+}
+
+/* ----------------------------------------------------------------------
+   Create a fix property/mol if required
+---------------------------------------------------------------------- */
+void FixNVTSllodMol::post_constructor() {
+  if (molpropflag)
+    modify->add_fix(fmt::format(
+          "{} {} property/mol com", id_molprop, group->names[igroup]));
+}
+
+/* ---------------------------------------------------------------------- */
+
+FixNVTSllodMol::~FixNVTSllodMol() {
+  if (molpropflag && modify->nfix) modify->delete_fix(id_molprop);
+  delete [] id_molprop;
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixNVTSllodMol::init() {
   FixNH::init();
-
-  // if (!temperature->tempbias)
-  //   error->all(FLERR,"Temperature for fix nvt/sllod/mol does not have a bias");
-
-  // nondeformbias = 0;
-  // if (strcmp(temperature->style,"temp/deform/mol") != 0) nondeformbias = 1;
 
   // Check that temperature calculates a molecular temperature
   // TODO(SS): add moltemp flag to compute.h that we can check?
@@ -147,20 +174,18 @@ void FixNVTSllodMol::init() {
   if (i == modify->nfix)
     error->all(FLERR,"Using fix nvt/sllod/mol with no fix deform defined");
 
+  // Get id of molprop
+  molprop = dynamic_cast<FixPropertyMol*>(modify->get_fix_by_id(id_molprop));
+  if (molprop == nullptr) // TODO(SS): Check that this fails when given an incorrect fix type
+    error->all(FLERR, "Fix nvt/sllod/mol could not find a fix property/mol with id {}", id_molprop);
   // TODO(SS): maybe just register with fix property/molecule that we need COM to avoid this?
-  if (atom->property_molecule == nullptr || !atom->property_molecule->com_flag)
-    error->all(FLERR, "fix nvt/sllod/mol requires a fix property/molecule to be"
-        " defined with the com option");
-}
+  if(!molprop->com_flag)
+    error->all(FLERR, "Fix nvt/sllod/mol requires fix property/mol to be "
+        "defined with the com option");
 
-void FixNVTSllodMol::setup(int vflag) {
-  FixNH::setup(vflag);
-
-  // Check for fix property/molecule in case it's been deleted.
-  // TODO(SS): Is this needed?
-  if (atom->property_molecule == nullptr || !atom->property_molecule->com_flag)
-    error->all(FLERR, "fix nvt/sllod/mol requires a fix property/molecule to be"
-        " defined with the com option");
+  // Check for exact group match since it's relied on for counting DoF by the temp compute
+  if (igroup != molprop->igroup)
+    error->all(FLERR, "Fix property/mol must be defined for the same group as fix nvt/sllod/mol");
 }
 
 /* ----------------------------------------------------------------------
@@ -259,7 +284,7 @@ void FixNVTSllodMol::nve_x()
   int nlocal = atom->nlocal;
 
   double *xcom, xcom_half[3], molcom[3];
-  double **&com = atom->property_molecule->com;
+  double **&com = molprop->com;
   tagint *molecule = atom->molecule;
   tagint m;
 
@@ -275,7 +300,7 @@ void FixNVTSllodMol::nve_x()
   xfac[2] = exp(grad_u[2]*dtv2);
 
   // Calculate CoM
-  atom->property_molecule->com_compute();
+  molprop->com_compute();
 
   // First half step
   for (int i = 0; i < nlocal; i++) {
@@ -307,7 +332,7 @@ void FixNVTSllodMol::nve_x()
   }
 
   // Update CoM
-  atom->property_molecule->com_compute();
+  molprop->com_compute();
 
   // 2nd reversible half step
   for (int i = 0; i < nlocal; i++) {

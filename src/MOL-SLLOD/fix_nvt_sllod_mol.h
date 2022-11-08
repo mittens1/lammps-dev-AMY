@@ -27,9 +27,15 @@ namespace LAMMPS_NS {
 class FixNVTSllodMol : public FixNH {
  public:
   FixNVTSllodMol(class LAMMPS *, int, char **);
+  ~FixNVTSllodMol();
+  void post_constructor() override;
 
   void init() override;
-  void setup(int) override;
+
+ protected:
+  int molpropflag;    // 1 = molprop created by nvt/sllod/mol, 0 = user supplied
+  char *id_molprop;   // Name of property/molecule fix
+  class FixPropertyMol *molprop;
 
  private:
   void nh_v_temp() override;

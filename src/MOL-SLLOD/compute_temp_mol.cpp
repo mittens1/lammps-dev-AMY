@@ -23,7 +23,7 @@
 #include "domain.h"
 #include "error.h"
 #include "fix.h"
-#include "fix_property_molecule.h"
+#include "fix_property_mol.h"
 #include "force.h"
 #include "group.h"
 #include "memory.h"
@@ -37,9 +37,10 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 ComputeTempMol::ComputeTempMol(LAMMPS *lmp, int narg, char **arg) :
-  Compute(lmp, narg, arg), vcm(nullptr), vcmall(nullptr)
+  Compute(lmp, narg, arg), vcm(nullptr), vcmall(nullptr), molprop(nullptr),
+  id_molprop(nullptr)
 {
-  if (narg != 3) error->all(FLERR,"Illegal compute temp/mol command");
+  if (narg != 4) error->all(FLERR,"Illegal compute temp/mol command");
 
   scalar_flag = vector_flag = 1;
   size_vector = 6;
@@ -58,6 +59,8 @@ ComputeTempMol::ComputeTempMol(LAMMPS *lmp, int narg, char **arg) :
 
   // per-atom allocation
   nmax = 0;
+
+  id_molprop = utils::strdup(arg[3]);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -67,31 +70,33 @@ ComputeTempMol::~ComputeTempMol()
   delete [] vector;
 
   // property_molecule may have already been destroyed
-  if (atom->property_molecule != nullptr) {
-    atom->property_molecule->destroy_permolecule(vcmall);
-    atom->property_molecule->destroy_permolecule(vcm);
+  molprop = dynamic_cast<FixPropertyMol*>(modify->get_fix_by_id(id_molprop));
+  if (molprop != nullptr) {
+    molprop->destroy_permolecule(&vcmall);
+    molprop->destroy_permolecule(&vcm);
   }
+  delete [] id_molprop;
 }
 
 /* ---------------------------------------------------------------------- */
 
 void ComputeTempMol::init()
 {
-  if (atom->property_molecule == nullptr ||
-      !atom->property_molecule->com_flag)
-    error->all(FLERR, "compute temp/deform/mol requires a fix property/molecule to be defined with the com option");
+  // Get id of molprop
+  molprop = dynamic_cast<FixPropertyMol*>(modify->get_fix_by_id(id_molprop));
+  if (molprop == nullptr) // TODO(SS): Check that this fails when given an incorrect fix type
+    error->all(FLERR, "Compute temp/mol could not find a fix property/mol with id {}", id_molprop);
+  if (!molprop->mass_flag)
+    error->all(FLERR, "Compute temp/mol requires fix property/mol with the mass or com flag");
+  if (igroup != molprop->igroup)
+    error->all(FLERR, "Fix property/mol must be defined for the same group as compute temp/mol");
 
-  atom->property_molecule->register_permolecule("temp/deform/mol:vcmall", &vcmall, Atom::DOUBLE, 3);
-  atom->property_molecule->register_permolecule("temp/deform/mol:vcm", &vcm, Atom::DOUBLE, 3);
+  molprop->register_permolecule("temp/mol:vcmall", &vcmall, Atom::DOUBLE, 3);
+  molprop->register_permolecule("temp/mol:vcm", &vcm, Atom::DOUBLE, 3);
 }
 
 void ComputeTempMol::setup()
 {
-  // Make sure fix property/molecule exists
-  if (atom->property_molecule == nullptr ||
-      !atom->property_molecule->com_flag)
-    error->all(FLERR, "compute temp/deform/mol requires a fix property/molecule to be defined with the com option");
-
   dynamic = 0;
   if (dynamic_user || group->dynamic[igroup]) dynamic = 1;
   dof_compute();
@@ -105,14 +110,8 @@ double ComputeTempMol::compute_scalar()
   int i;
   invoked_scalar = update->ntimestep;
 
-  tagint nmolecule = atom->property_molecule->nmolecule;
-  double *molmass = atom->property_molecule->mass;
-
-  // Update COM if it isn't already (generally should be)
-  // if (atom->property_molecule->comstep != update->ntimestep)
-  // TODO(SS): figure out correct way to skip calculating CoM.
-  //           At the moment, nve_x invalidates it, but it should be correct
-  //           between 2nd temp_integrate of one step and first of the next.
+  tagint nmolecule = molprop->nmolecule;
+  double *molmass = molprop->mass;
 
   // calculate global temperature
 
@@ -153,8 +152,8 @@ void ComputeTempMol::compute_vector()
 
   invoked_vector = update->ntimestep;
 
-  tagint nmolecule = atom->property_molecule->nmolecule;
-  double *molmass = atom->property_molecule->mass;
+  tagint nmolecule = molprop->nmolecule;
+  double *molmass = molprop->mass;
 
   double **v = atom->v;
   double *mass = atom->mass;
@@ -212,7 +211,7 @@ void ComputeTempMol::dof_compute()
   // TODO(SS): nmolecule is currently the max. molecule index, but some indices
   //           could be skipped which would make this incorrect. Also currently
   //           incorrect if not all molecules are in the group.
-  dof = domain->dimension * (atom->property_molecule->nmolecule + nsingle);
+  dof = domain->dimension * (molprop->nmolecule + nsingle);
 
   dof -= extra_dof; // + fix_dof;
   if (dof > 0)
@@ -234,8 +233,8 @@ void ComputeTempMol::vcm_compute(double *ke_singles)
 
   // molid = 1 to nmolecule for included atoms, 0 for excluded atoms
   tagint *molecule = atom->molecule;
-  tagint nmolecule = atom->property_molecule->nmolecule;
-  double *molmass = atom->property_molecule->mass;
+  tagint nmolecule = molprop->nmolecule;
+  double *molmass = molprop->mass;
 
   // Reallocation handled by fix property/molecule.
   // Make sure size is up to date
@@ -304,8 +303,8 @@ double ComputeTempMol::memory_usage()
 {
   double bytes = 0;
   // vcm and vcmall not allocated if property_molecule is nullptr
-  if (atom->property_molecule != nullptr)
-    bytes += (bigint) atom->property_molecule->nmolecule * 6 * sizeof(double);
+  if (molprop != nullptr)
+    bytes += (bigint) molprop->nmolecule * 6 * sizeof(double);
 
   return bytes;
 }

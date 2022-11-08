@@ -22,7 +22,7 @@
 #include "domain.h"
 #include "error.h"
 #include "fix.h"
-#include "fix_property_molecule.h"
+#include "fix_property_mol.h"
 #include "force.h"
 #include "improper.h"
 #include "kspace.h"
@@ -38,10 +38,10 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 ComputePressureMol::ComputePressureMol(LAMMPS *lmp, int narg, char **arg) :
-  Compute(lmp, narg, arg), id_temp(nullptr)
+  Compute(lmp, narg, arg), id_temp(nullptr), id_molprop(nullptr), molprop(nullptr)
 {
-  if (narg < 4) error->all(FLERR,"Illegal compute pressure command");
-  if (igroup) error->all(FLERR,"Compute pressure must use group all");
+  if (narg < 5) error->all(FLERR,"Illegal compute pressure/mol command");
+  if (igroup) error->all(FLERR,"Compute pressure/mol must use group all");
 
   scalar_flag = vector_flag = 1;
   size_vector = 9;
@@ -50,21 +50,13 @@ ComputePressureMol::ComputePressureMol(LAMMPS *lmp, int narg, char **arg) :
   pressflag = 1;
   timeflag = 1;
 
-  if (strcmp(arg[3],"NULL") == 0) id_temp = nullptr;
-  else {
-    id_temp = utils::strdup(arg[3]);
-
-    int icompute = modify->find_compute(id_temp);
-    if (icompute < 0)
-      error->all(FLERR,"Could not find compute pressure temperature ID");
-    if (modify->compute[icompute]->tempflag == 0)
-      error->all(FLERR,"Compute pressure temperature ID does not "
-                 "compute temperature");
-  }
+  id_molprop = utils::strdup(arg[3]);
+  if (strcmp(arg[4],"NULL") == 0) id_temp = nullptr;
+  else id_temp = utils::strdup(arg[4]);
 
   // process optional args
 
-  if (narg == 4) {
+  if (narg == 5) {
     keflag = 1;
     pairflag = 1;
     kspaceflag = 1;
@@ -72,7 +64,7 @@ ComputePressureMol::ComputePressureMol(LAMMPS *lmp, int narg, char **arg) :
     keflag = 0;
     pairflag = 0;
     kspaceflag = 0;
-    int iarg = 4;
+    int iarg = 5;
     while (iarg < narg) {
       if (strcmp(arg[iarg],"ke") == 0) keflag = 1;
       else if (strcmp(arg[iarg],"pair") == 0) pairflag = 1;
@@ -101,6 +93,7 @@ ComputePressureMol::~ComputePressureMol()
 {
   if (force && force->pair) force->pair->del_tally_callback(this);
   delete [] id_temp;
+  delete [] id_molprop;
   delete [] vector;
 }
 
@@ -144,9 +137,22 @@ void ComputePressureMol::init()
     int icompute = modify->find_compute(id_temp);
     if (icompute < 0)
       error->all(FLERR,"Could not find compute pressure temperature ID");
+    if (modify->compute[icompute]->tempflag == 0)
+      error->all(FLERR,"Compute pressure temperature ID does not "
+                 "compute temperature");
     temperature = modify->compute[icompute];
   }
 
+  // find fix property/mol
+  molprop = dynamic_cast<FixPropertyMol*>(modify->get_fix_by_id(id_molprop));
+  if (molprop == nullptr) // TODO(SS): Check that this fails when given an incorrect fix type
+    error->all(FLERR, "Compute pressure/mol could not find a fix property/mol with id {}", id_molprop);
+  // TODO(SS): maybe just register with fix property/molecule that we need COM to avoid this?
+  if(!molprop->com_flag)
+    error->all(FLERR, "Compute pressure/mol requires fix property/mol to be "
+        "defined with the com option");
+  if (igroup != molprop->igroup)
+    error->all(FLERR, "Compute pressure/mol must be defined for the same group as fix nvt/sllod/mol");
 
   // Tally callback doesn't work with fdotr virial.
   // Could theoretically use it for molecular virial if it existed.
@@ -158,6 +164,16 @@ void ComputePressureMol::init()
   if (kspaceflag && force->kspace) kspace_virial = force->kspace->virial;
   else kspace_virial = nullptr;
 
+  // Get id of molprop
+  molprop = dynamic_cast<FixPropertyMol*>(modify->get_fix_by_id(id_molprop));
+  if (molprop == nullptr) // TODO(SS): Check that this fails when given an incorrect fix type
+    error->all(FLERR, "Compute pressure/mol could not find a fix property/mol with id {}", id_molprop);
+  // TODO(SS): maybe just register with fix property/molecule that we need COM to avoid this?
+  if (!molprop->com_flag)
+    error->all(FLERR, "Compute pressure/mol requires fix property/mol to be "
+        "defined with the com option");
+  if (igroup != molprop->igroup)
+    error->all(FLERR, "Fix property/mol must be defined for the same group as compute pressure/mol");
 }
 
 /* ----------------------------------------------------------------------
@@ -307,8 +323,8 @@ void ComputePressureMol::pair_setup_callback(int eflag, int vflag) {
     pair_virial[d] = 0.0;
 
   // Make sure CoM is up to date
-  if (atom->property_molecule->comstep != update->ntimestep)
-    atom->property_molecule->com_compute();
+  if (molprop->comstep != update->ntimestep)
+    molprop->com_compute();
 }
 
 /* ----------------------------------------------------------------------
@@ -325,12 +341,8 @@ void ComputePressureMol::pair_tally_callback(int i, int j, int nlocal,
   // Virial does not need to be tallied if we didn't do setup this step
   if (did_setup != update->ntimestep) return;
 
-  if (atom->property_molecule == nullptr ||
-      !atom->property_molecule->com_flag)
-    error->all(FLERR, "calculation of the molecular virial requires a fix property/molecule to be defined with the com option");
-
   double delcom[3], v[9];
-  double **com = atom->property_molecule->com;
+  double **com = molprop->com;
 
   tagint mol_i = atom->molecule[i]-1;
   tagint mol_j = atom->molecule[j]-1;

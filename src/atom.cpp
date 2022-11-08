@@ -126,8 +126,6 @@ Atom::Atom(LAMMPS *lmp) : Pointers(lmp)
 
   // molecular systems
 
-  property_molecule = nullptr;
-
   molecule = nullptr;
   molindex = molatom = nullptr;
 

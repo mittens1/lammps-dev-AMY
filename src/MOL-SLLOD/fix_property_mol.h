@@ -13,22 +13,22 @@
 
 #ifdef FIX_CLASS
 // clang-format off
-FixStyle(property/molecule,FixPropertyMolecule);
+FixStyle(property/mol,FixPropertyMol);
 // clang-format on
 #else
 
-#ifndef LMP_FIX_PROPERTY_MOLECULE_H
-#define LMP_FIX_PROPERTY_MOLECULE_H
+#ifndef LMP_FIX_PROPERTY_MOL_H
+#define LMP_FIX_PROPERTY_MOL_H
 
 #include "fix.h"
 
 namespace LAMMPS_NS {
 
-class FixPropertyMolecule : public Fix {
+class FixPropertyMol : public Fix {
  public:
-  FixPropertyMolecule(class LAMMPS *, int, char **);
+  FixPropertyMol(class LAMMPS *, int, char **);
 
-  ~FixPropertyMolecule() override;
+  ~FixPropertyMol() override;
   int setmask() override;
   void init() override;
   void setup_pre_force(int) override;

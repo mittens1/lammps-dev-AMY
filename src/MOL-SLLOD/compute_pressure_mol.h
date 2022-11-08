@@ -40,12 +40,16 @@ class ComputePressureMol : public Compute {
   double boltz, nktv2p, inv_volume;
   int dimension;
   double *kspace_virial;
-  Compute *temperature;
-  char *id_temp;
   double virial[9];    // ordering: xx,yy,zz,xy,xz,yz,yx,zx,zy
   double pair_virial[9];
   int keflag, pairflag;
   int kspaceflag;
+
+  Compute *temperature;
+  char *id_temp;
+
+  class FixPropertyMol *molprop;
+  char *id_molprop;
 
   void virial_compute(int, int);
 
