@@ -54,28 +54,32 @@ class FixPropertyMol : public Fix {
   // Calculate nmolecule and grow permolecule vectors/arrays as needed
   void grow_permolecule(int=0);
 
-  double *mass;       // per molecule mass
-  double **com;       // per molecule center of mass in unwrapped coords
-  bigint com_step;    // last step where com was updated
-  bigint mass_step;   // last step where mass was updated
+  double *mass;           // per molecule mass
+  double **com;           // per molecule center of mass in unwrapped coords
+  bigint mass_step;       // last step where mass was updated
+  bigint com_step;        // last step where com was updated
 
-  tagint molmax;              // Max. molecule id
-  int com_flag, mass_flag;    // flags for specific fields
+  tagint molmax;          // Max. molecule id
   
-  int dynamic_group;  // 1 = group is dynamic (nmolecule could change)
-  int dynamic_mols;   // 1 = number of molecules could change during run
+  int dynamic_group;      // 1 = group is dynamic (nmolecule could change)
+  int dynamic_mols;       // 1 = number of molecules could change during run
 
-  bigint count_step;  // Last step where count_molecules was called
-  tagint nmolecule;   // Number of molecules in the group
+  bigint count_step;      // Last step where count_molecules was called
+  tagint nmolecule;       // Number of molecules in the group
   void count_molecules();
   void mass_compute();
   void com_compute();
 
+  void request_com();     // Request that CoM be allocated (implies mass)
+  void request_mass();    // Request that mass be allocated
+
  protected:
-  tagint nmax;                // length of permolecule arrays the last time they grew
+  tagint nmax;            // length of permolecule arrays the last time they grew
+
   std::vector<PerMolecule> permolecule;
 
   double *massproc, **comproc;
+  int mass_flag, com_flag;    // 1 if mass/com can be computed
 
   void mem_create(PerMolecule &item);
   void mem_grow(PerMolecule &item);

@@ -32,7 +32,7 @@ FixPropertyMol::FixPropertyMol(LAMMPS *lmp, int narg, char **arg) :
     Fix(lmp, narg, arg), mass(nullptr), com(nullptr), massproc(nullptr),
     comproc(nullptr)
 {
-  if (narg < 4) error->all(FLERR, "Illegal fix property/atom command");
+  if (narg < 3) error->all(FLERR, "Illegal fix property/atom command");
 
   int iarg = 3;
 
@@ -43,16 +43,15 @@ FixPropertyMol::FixPropertyMol(LAMMPS *lmp, int narg, char **arg) :
 
   while (iarg < narg) {
     if (strcmp(arg[iarg], "mass") == 0) {
-      mass_flag = 1;
+      request_mass();
       iarg++;
     } else if (strcmp(arg[iarg], "com") == 0) {
-      if (com_flag) continue;
-      mass_flag = 1;
-      com_flag = 1;
+      request_com();
       iarg++;
     } else if (strcmp(arg[iarg], "dynamic") == 0) {
       dynamic_mols = 1;
-    }else error->all(FLERR, "Illegal fix property/atom command");
+      iarg++;
+    } else error->all(FLERR, "Illegal fix property/mol command");
   }
 
   nmax = 0;
@@ -62,15 +61,6 @@ FixPropertyMol::FixPropertyMol(LAMMPS *lmp, int narg, char **arg) :
   com_step = -1;
   mass_step = -1;
   count_step = -1;
-
-  if (mass_flag) {
-    register_permolecule("property/mol:mass", &mass, Atom::DOUBLE, 0);
-    register_permolecule("property/mol:massproc", &massproc, Atom::DOUBLE, 0);
-  }
-  if (com_flag)  {
-    register_permolecule("property/mol:com", &com, Atom::DOUBLE, 3);
-    register_permolecule("property/mol:comproc", &comproc, Atom::DOUBLE, 3);
-  }
 
   array_flag = 1;
   size_array_cols = 4;
@@ -92,6 +82,21 @@ int FixPropertyMol::setmask()
   mask |= PRE_FORCE;
   mask |= PRE_FORCE_RESPA;
   return mask;
+}
+
+void FixPropertyMol::request_com() {
+  if (com_flag) return;
+  com_flag = 1;
+  request_mass();
+  register_permolecule("property/mol:com", &com, Atom::DOUBLE, 3);
+  register_permolecule("property/mol:comproc", &comproc, Atom::DOUBLE, 3);
+}
+
+void FixPropertyMol::request_mass() {
+  if (mass_flag) return;
+  mass_flag = 1;
+  register_permolecule("property/mol:mass", &mass, Atom::DOUBLE, 0);
+  register_permolecule("property/mol:massproc", &massproc, Atom::DOUBLE, 0);
 }
 
 /* ----------------------------------------------------------------------
@@ -307,8 +312,8 @@ void FixPropertyMol::com_compute() {
 double FixPropertyMol::memory_usage()
 {
   double bytes = 0.0;
-  if (mass_flag) bytes += nmax * sizeof(double);
-  if (com_flag)  bytes += nmax * 3 * sizeof(double);
+  if (mass_flag) bytes += nmax * 2 * sizeof(double);
+  if (com_flag)  bytes += nmax * 6 * sizeof(double);
   return bytes;
 }
 
@@ -325,14 +330,15 @@ double FixPropertyMol::compute_array(int imol, int col)
 
   if (col == 3) {
     // Mass requested
-    if (!mass_flag || (dynamic_group && mass_step != update->ntimestep)
-                   || (!dynamic_group && mass_step == -1))
-      error->all(FLERR, "fix property/mol molecular mass was not calculated this step");
+    if (!mass_flag)
+      error->all(FLERR, "This fix property/mol does not calculate mass");
+    if (dynamic_group && mass_step != update->ntimestep) mass_compute();
     return mass[imol];
   } else {
     // CoM requested
-    if (!com_flag || com_step != update->ntimestep)
-      error->all(FLERR, "fix property/mol CoM was not calculated this step");
+    if (!com_flag)
+      error->all(FLERR, "This fix property/mol does not calculate CoM");
+    if (com_step != update->ntimestep) com_compute();
     return com[imol][col];
   }
 }

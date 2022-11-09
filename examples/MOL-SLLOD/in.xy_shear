@@ -21,7 +21,7 @@ variable eps index 0.1
 fix def all deform 0 xy erate ${eps} remap none
 fix sllod all nvt/sllod/mol temp 1.0 1.0 0.1 molprop pmol
 
-fix pmol all property/mol com
+fix pmol all property/mol
 
 # Antisymmetric components of the molecular pressure temperature
 compute molpress all pressure/mol pmol sllod_temp

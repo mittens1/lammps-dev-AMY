@@ -55,7 +55,6 @@ ComputePressureMol::ComputePressureMol(LAMMPS *lmp, int narg, char **arg) :
   else id_temp = utils::strdup(arg[4]);
 
   // process optional args
-
   if (narg == 5) {
     keflag = 1;
     pairflag = 1;
@@ -79,7 +78,6 @@ ComputePressureMol::ComputePressureMol(LAMMPS *lmp, int narg, char **arg) :
   }
 
   // error check
-
   if (keflag && id_temp == nullptr)
     error->all(FLERR,"Compute pressure requires temperature ID "
                "to include kinetic energy");
@@ -132,7 +130,6 @@ void ComputePressureMol::init()
 
   // set temperature compute, must be done in init()
   // fixes could have changed or compute_modify could have changed it
-
   if (keflag) {
     int icompute = modify->find_compute(id_temp);
     if (icompute < 0)
@@ -147,20 +144,16 @@ void ComputePressureMol::init()
   molprop = dynamic_cast<FixPropertyMol*>(modify->get_fix_by_id(id_molprop));
   if (molprop == nullptr) // TODO(SS): Check that this fails when given an incorrect fix type
     error->all(FLERR, "Compute pressure/mol could not find a fix property/mol with id {}", id_molprop);
-  // TODO(SS): maybe just register with fix property/molecule that we need COM to avoid this?
-  if(!molprop->com_flag)
-    error->all(FLERR, "Compute pressure/mol requires fix property/mol to be "
-        "defined with the com option");
   if (igroup != molprop->igroup)
     error->all(FLERR, "Compute pressure/mol must be defined for the same group as fix nvt/sllod/mol");
+  // Make sure CoM can be computed
+  molprop->request_com();
 
   // Tally callback doesn't work with fdotr virial.
   // Could theoretically use it for molecular virial if it existed.
-
   if (pairflag) force->pair->no_virial_fdotr_compute = 1;
 
   // flag Kspace contribution separately, since not summed across procs
-
   if (kspaceflag && force->kspace) kspace_virial = force->kspace->virial;
   else kspace_virial = nullptr;
 }

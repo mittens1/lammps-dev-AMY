@@ -86,11 +86,12 @@ void ComputeTempMol::init()
   molprop = dynamic_cast<FixPropertyMol*>(modify->get_fix_by_id(id_molprop));
   if (molprop == nullptr) // TODO(SS): Check that this fails when given an incorrect fix type
     error->all(FLERR, "Compute temp/mol could not find a fix property/mol with id {}", id_molprop);
-  if (!molprop->mass_flag)
-    error->all(FLERR, "Compute temp/mol requires fix property/mol with the mass or com flag");
+  // if (!molprop->mass_flag)
+  //   error->all(FLERR, "Compute temp/mol requires fix property/mol with the mass or com flag");
   if (igroup != molprop->igroup)
     error->all(FLERR, "Fix property/mol must be defined for the same group as compute temp/mol");
 
+  molprop->request_mass();
   molprop->register_permolecule("temp/mol:vcmall", &vcmall, Atom::DOUBLE, 3);
   molprop->register_permolecule("temp/mol:vcm", &vcm, Atom::DOUBLE, 3);
 }

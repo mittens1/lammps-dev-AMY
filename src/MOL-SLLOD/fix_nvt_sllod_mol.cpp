@@ -109,7 +109,7 @@ FixNVTSllodMol::FixNVTSllodMol(LAMMPS *lmp, int narg, char **arg) :
 void FixNVTSllodMol::post_constructor() {
   if (molpropflag)
     modify->add_fix(fmt::format(
-          "{} {} property/mol com", id_molprop, group->names[igroup]));
+          "{} {} property/mol", id_molprop, group->names[igroup]));
 }
 
 /* ---------------------------------------------------------------------- */
@@ -178,10 +178,8 @@ void FixNVTSllodMol::init() {
   molprop = dynamic_cast<FixPropertyMol*>(modify->get_fix_by_id(id_molprop));
   if (molprop == nullptr) // TODO(SS): Check that this fails when given an incorrect fix type
     error->all(FLERR, "Fix nvt/sllod/mol could not find a fix property/mol with id {}", id_molprop);
-  // TODO(SS): maybe just register with fix property/molecule that we need COM to avoid this?
-  if(!molprop->com_flag)
-    error->all(FLERR, "Fix nvt/sllod/mol requires fix property/mol to be "
-        "defined with the com option");
+  // Make sure CoM can be computed
+  molprop->request_com();
 
   // Check for exact group match since it's relied on for counting DoF by the temp compute
   if (igroup != molprop->igroup)
