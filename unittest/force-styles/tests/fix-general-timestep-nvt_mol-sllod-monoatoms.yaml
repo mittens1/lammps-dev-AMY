@@ -11,11 +11,11 @@ pre_commands: ! ""
 post_commands: ! |
   neigh_modify delay 4
    fix def all deform 0 xy erate 1.0 remap none
-   compute shear_temp all temp/mol
-   fix test all nvt/sllod/mol temp 1.0 1.0 $(50.0*dt) tchain 1
+   compute shear_temp all temp/mol molprop
+   fix molprop all property/mol com
+   fix test all nvt/sllod/mol temp 1.0 1.0 $(50.0*dt) tchain 1 molprop molprop
    fix_modify test temp shear_temp
-   fix molprop all property/molecule com
-   compute molpress all pressure/mol shear_temp
+   compute molpress all pressure/mol molprop shear_temp
 input_file: in.mol-sllod-monoatoms
 natoms: 1792
 global_scalar: -0.49905329704414236
