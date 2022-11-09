@@ -312,6 +312,8 @@ void FixNVTSllodMol::nve_x()
         // streaming velocity is correct, since com stores unwrapped coords
         // This means that these equations of motion are only correct if
         // molecules don't extend more than half the box length from their CoM.
+        // Could maybe do something clever with image flags for molecules, but
+        // that would get expensive to calculate them consistently.
         molcom[0] = com[m][0];
         molcom[1] = com[m][1];
         molcom[2] = com[m][2];

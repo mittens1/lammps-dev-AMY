@@ -16,6 +16,7 @@
 #include "atom.h"
 #include "domain.h"
 #include "error.h"
+#include "group.h"
 #include "memory.h"
 #include "update.h"
 
@@ -37,6 +38,8 @@ FixPropertyMol::FixPropertyMol(LAMMPS *lmp, int narg, char **arg) :
 
   mass_flag = 0;
   com_flag = 0;
+  dynamic_group = group->dynamic[igroup];
+  dynamic_mols = 0;
 
   while (iarg < narg) {
     if (strcmp(arg[iarg], "mass") == 0) {
@@ -47,13 +50,18 @@ FixPropertyMol::FixPropertyMol(LAMMPS *lmp, int narg, char **arg) :
       mass_flag = 1;
       com_flag = 1;
       iarg++;
-    } else error->all(FLERR, "Illegal fix property/atom command");
+    } else if (strcmp(arg[iarg], "dynamic") == 0) {
+      dynamic_mols = 1;
+    }else error->all(FLERR, "Illegal fix property/atom command");
   }
 
   nmax = 0;
-  nmolecule = 1;
+  molmax = 1;
+  nmolecule = 0;
 
-  comstep = -1;
+  com_step = -1;
+  mass_step = -1;
+  count_step = -1;
 
   if (mass_flag) {
     register_permolecule("property/mol:mass", &mass, Atom::DOUBLE, 0);
@@ -140,33 +148,32 @@ void FixPropertyMol::init()
         "Fix property/mol when atom_style does not define a molecule attribute");
 }
 
-void FixPropertyMol::setup_pre_force(int vflag) {
-
-  // This assumes number of molecules won't change during a run
-  // If something like fix gcmc could change this, maybe add a flag for that?
-  // Recalculating nmolecule each step requires comm, so probably not ideal if
-  // it can be avoided
-  // Needs to be run before main setup() calls, since those could rely on the
-  // memory being allocated (eg. for fix nvt/sllod/molecule with kick yes)
+/* ----------------------------------------------------------------------
+   Need to calculate mass and CoM before main setup() calls since those
+   could rely on the memory being allocated (e.g. for virial tallying)
+---------------------------------------------------------------------- */
+void FixPropertyMol::setup_pre_force(int /*vflag*/) {
   grow_permolecule();
+  // com_compute also computes mass if dynamic_group is set
+  // so no need to call mass_compute in that case
+  if (mass_flag && !dynamic_group) mass_compute();
   if (com_flag) com_compute();
+  if (mass_flag) count_molecules();
 }
 
 void FixPropertyMol::setup_pre_force_respa(int vflag, int ilevel) {
-
-  // TODO: Any reason to check other levels for new number of molecules?
   if (ilevel == 0) setup_pre_force(vflag);
 }
 
+
 /* ----------------------------------------------------------------------
-   Calculate number of molecules and grow permolecule arrays if needed
+   Calculate number of molecules and grow permolecule arrays if needed.
+   Grows to the maximum of previous max. mol id + grow_by and new max. mol id
+   if either is larger than nmax.
 ------------------------------------------------------------------------- */
 
-void FixPropertyMol::grow_permolecule() {
-  // Calculate number of molecules
-  // TODO: maybe take an input value for how much to grow by,
-  //       or 0 if nmolecule should be calculated?
-  //       This could all change if we handle molecule ownership.
+void FixPropertyMol::grow_permolecule(int grow_by) {
+  // Calculate maximum molecule id
   tagint *molecule = atom->molecule;
   int nlocal = atom->nlocal;
   tagint maxone = -1;
@@ -176,19 +183,31 @@ void FixPropertyMol::grow_permolecule() {
   MPI_Allreduce(&maxone, &maxall, 1, MPI_LMP_TAGINT, MPI_MAX, world);
   if (maxall > MAXSMALLINT)
     error->all(FLERR, "Molecule IDs too large for fix property/mol");
-  nmolecule = maxall;
+
+  tagint new_size = molmax + grow_by;
+  molmax = maxall;
+  new_size = MAX(molmax, new_size);
 
   // Grow arrays as needed
-  if (nmax < nmolecule) {
-    nmax = nmolecule;
+  if (nmax < new_size) {
+    nmax = new_size;
     for (auto &item : permolecule) mem_grow(item);
-
-    // Recompute mass if number of molecules has changed
-    // Assumes mass is constant.
-    if (mass_flag) mass_compute();
   }
 
-  size_array_rows = static_cast<int>(nmolecule);
+  size_array_rows = static_cast<int>(molmax);
+}
+
+
+/* ----------------------------------------------------------------------
+   Count the number of molecules with non-zero mass.
+   Mass of molecules is only counted from atoms in the group, so count is
+   the number of molecules in the group.
+------------------------------------------------------------------------- */
+void FixPropertyMol::count_molecules() {
+  count_step = update->ntimestep;
+  nmolecule = 0;
+  for (tagint m = 0; m < molmax; ++m)
+    if (mass[m] > 0.0) ++nmolecule;
 }
 
 /* ----------------------------------------------------------------------
@@ -196,83 +215,79 @@ void FixPropertyMol::grow_permolecule() {
 ------------------------------------------------------------------------- */
 
 void FixPropertyMol::mass_compute() {
-  if (nmolecule == 0) return;
+  mass_step = update->ntimestep;
+  if (dynamic_mols) grow_permolecule();
+  if (molmax == 0) return;
   double massone;
-  for (tagint m = 0; m < nmolecule; ++m)
+  for (tagint m = 0; m < molmax; ++m)
     massproc[m] = 0.0;
 
   for (int i = 0; i < atom->nlocal; ++i) {
-    tagint m = atom->molecule[i]-1;
-    if (m < 0) continue;
-    if (atom->rmass) massone = atom->rmass[i];
-    else massone = atom->mass[atom->type[i]];
-    massproc[m] += massone;
+    if (groupbit & atom->mask[i]) {
+      tagint m = atom->molecule[i]-1;
+      if (m < 0) continue;
+      if (atom->rmass) massone = atom->rmass[i];
+      else massone = atom->mass[atom->type[i]];
+      massproc[m] += massone;
+    }
   }
-  MPI_Allreduce(massproc,mass,nmolecule,MPI_DOUBLE,MPI_SUM,world);
-}
-
-/* ----------------------------------------------------------------------
-   Update COM before force calculation so it can be used to tally the
-   molecular virial
-------------------------------------------------------------------------- */
-
-void FixPropertyMol::pre_force(int vflag) {
-
-  // NOTE: This is quite specific to COM. Probably best to add a general
-  // framework in future to handle where in the run each per-molecule
-  // vector/array should be recalculated, and to combine the tallying and MPI
-  // communication where possible
-  // Alternatively, property/mol could just handle memory allocation, and
-  // let other code do the actual calculation
-  if (com_flag) com_compute();
-}
-
-// TODO: Not sure how often this actually needs to be called, or if there are
-// smart performance things we could do
-void FixPropertyMol::pre_force_respa(int vflag, int /*ilevel*/, int /*iloop*/) {
-  pre_force(vflag);
+  MPI_Allreduce(massproc,mass,molmax,MPI_DOUBLE,MPI_SUM,world);
 }
 
 /* ----------------------------------------------------------------------
    Calculate center of mass of each molecule in unwrapped coords
+   Also update molecular mass if group is dynamic
 ------------------------------------------------------------------------- */
 
 void FixPropertyMol::com_compute() {
-  comstep = update->ntimestep;
-  if (nmolecule == 0) return; // Prevent segfault if no molecules exit
+  com_step = update->ntimestep;
+  if (dynamic_mols) grow_permolecule();
+  if (molmax == 0) return;
 
   int nlocal = atom->nlocal;
   tagint *molecule = atom->molecule;
 
   int *type = atom->type;
-  imageint *image = atom->image;
   double *amass = atom->mass;
   double *rmass = atom->rmass;
   double **x = atom->x;
   double **v = atom->v;
   double massone, unwrap[3];
 
-  for (int m = 0; m < nmolecule; ++m) {
+  for (int m = 0; m < molmax; ++m) {
     comproc[m][0] = 0.0;
     comproc[m][1] = 0.0;
     comproc[m][2] = 0.0;
   }
 
-  for (int i = 0; i < nlocal; ++i) {
-    tagint m = molecule[i]-1;
-    if (m < 0) continue;
-    if (rmass) massone = rmass[i];
-    else massone = amass[type[i]];
-
-    domain->unmap(x[i],image[i],unwrap);
-    comproc[m][0] += unwrap[0] * massone;
-    comproc[m][1] += unwrap[1] * massone;
-    comproc[m][2] += unwrap[2] * massone;
+  if (dynamic_group) {
+    mass_step = update->ntimestep;
+    for (tagint m = 0; m < molmax; ++m)
+      massproc[m] = 0.0;
   }
 
-  MPI_Allreduce(&comproc[0][0],&com[0][0],3*nmolecule,MPI_DOUBLE,MPI_SUM,world);
+  for (int i = 0; i < nlocal; ++i) {
+    if (groupbit & atom->mask[i]) {
+      tagint m = molecule[i]-1;
+      if (m < 0) continue;
+      if (rmass) massone = rmass[i];
+      else massone = amass[type[i]];
 
-  for (int m = 0; m < nmolecule; ++m) {
+      // NOTE: if FP error becomes a problem here in long-running
+      //       simulations, could maybe do something clever with
+      //       image flags to reduce it, but MPI makes that difficult.
+      domain->unmap(x[i],atom->image[i],unwrap);
+      comproc[m][0] += unwrap[0] * massone;
+      comproc[m][1] += unwrap[1] * massone;
+      comproc[m][2] += unwrap[2] * massone;
+      if (dynamic_group) massproc[m] += massone;
+    }
+  }
+
+  MPI_Allreduce(&comproc[0][0],&com[0][0],3*molmax,MPI_DOUBLE,MPI_SUM,world);
+  if (dynamic_group) MPI_Allreduce(massproc,mass,molmax,MPI_DOUBLE,MPI_SUM,world);
+
+  for (int m = 0; m < molmax; ++m) {
     // Some molecule ids could be skipped (not assigned atoms)
     if (mass[m] > 0.0) {
       com[m][0] /= mass[m];
@@ -298,17 +313,28 @@ double FixPropertyMol::memory_usage()
 }
 
 /* ----------------------------------------------------------------------
-   basic array output, almost no error checking
+   basic array output
 ------------------------------------------------------------------------- */
 
 double FixPropertyMol::compute_array(int imol, int col)
 {
-  if (imol > static_cast<int>(nmolecule))
+  if (imol > static_cast<int>(molmax))
     error->all(FLERR, fmt::format(
-      "Cannot request info for molecule {} from fix property/mol (nmolecule = {})",
-      imol, nmolecule));
-  if (col == 3) return mass[imol];
-  else return com[imol][col];
+      "Cannot request info for molecule {} from fix property/mol (molmax = {})",
+      imol, molmax));
+
+  if (col == 3) {
+    // Mass requested
+    if (!mass_flag || (dynamic_group && mass_step != update->ntimestep)
+                   || (!dynamic_group && mass_step == -1))
+      error->all(FLERR, "fix property/mol molecular mass was not calculated this step");
+    return mass[imol];
+  } else {
+    // CoM requested
+    if (!com_flag || com_step != update->ntimestep)
+      error->all(FLERR, "fix property/mol CoM was not calculated this step");
+    return com[imol][col];
+  }
 }
 
 /* ----------------------------------------------------------------------

@@ -163,17 +163,6 @@ void ComputePressureMol::init()
 
   if (kspaceflag && force->kspace) kspace_virial = force->kspace->virial;
   else kspace_virial = nullptr;
-
-  // Get id of molprop
-  molprop = dynamic_cast<FixPropertyMol*>(modify->get_fix_by_id(id_molprop));
-  if (molprop == nullptr) // TODO(SS): Check that this fails when given an incorrect fix type
-    error->all(FLERR, "Compute pressure/mol could not find a fix property/mol with id {}", id_molprop);
-  // TODO(SS): maybe just register with fix property/molecule that we need COM to avoid this?
-  if (!molprop->com_flag)
-    error->all(FLERR, "Compute pressure/mol requires fix property/mol to be "
-        "defined with the com option");
-  if (igroup != molprop->igroup)
-    error->all(FLERR, "Fix property/mol must be defined for the same group as compute pressure/mol");
 }
 
 /* ----------------------------------------------------------------------
@@ -323,7 +312,7 @@ void ComputePressureMol::pair_setup_callback(int eflag, int vflag) {
     pair_virial[d] = 0.0;
 
   // Make sure CoM is up to date
-  if (molprop->comstep != update->ntimestep)
+  if (molprop->com_step != update->ntimestep)
     molprop->com_compute();
 }
 
@@ -351,7 +340,6 @@ void ComputePressureMol::pair_tally_callback(int i, int j, int nlocal,
   // NOTE: this assumes that an atom is always closer to the CoM of the
   //       molecule it belongs to than to any image of that CoM. This may not
   //       hold for molecules that are longer than half the box length.
-  // TODO(SS): This can probably be fixed by attaching image flags to CoM coords.
   double *com_i, *com_j, com_tmp_i[3], com_tmp_j[3];
   if (mol_i < 0) com_i = atom->x[i];
   else {

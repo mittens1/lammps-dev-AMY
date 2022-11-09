@@ -59,6 +59,7 @@ thermo_modify norm no
 # Dump the atom positions
 # dump sllod_dump all atom 10 xy_sllod.lammpstrj
 
+# variable Etot equal etotal
 # fix av all ave/time 1 1 1 v_Etot v_Edot_sllod v_Edot_alpha v_Edot_expected file energy_dissipation.csv
 
-run 1 #5000
+run 500

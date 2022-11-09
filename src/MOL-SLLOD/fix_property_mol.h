@@ -33,8 +33,6 @@ class FixPropertyMol : public Fix {
   void init() override;
   void setup_pre_force(int) override;
   void setup_pre_force_respa(int, int) override;
-  void pre_force(int) override;
-  void pre_force_respa(int, int, int) override;
   double memory_usage() override;
   double compute_array(int, int) override;
 
@@ -54,15 +52,22 @@ class FixPropertyMol : public Fix {
   void destroy_permolecule(void*);
 
   // Calculate nmolecule and grow permolecule vectors/arrays as needed
-  void grow_permolecule();
+  void grow_permolecule(int=0);
 
   double *mass;       // per molecule mass
   double **com;       // per molecule center of mass in unwrapped coords
-  bigint comstep;     // last step where com was updated
+  bigint com_step;    // last step where com was updated
+  bigint mass_step;   // last step where mass was updated
 
-  tagint nmolecule;           // # of molecules
+  tagint molmax;              // Max. molecule id
   int com_flag, mass_flag;    // flags for specific fields
+  
+  int dynamic_group;  // 1 = group is dynamic (nmolecule could change)
+  int dynamic_mols;   // 1 = number of molecules could change during run
 
+  bigint count_step;  // Last step where count_molecules was called
+  tagint nmolecule;   // Number of molecules in the group
+  void count_molecules();
   void mass_compute();
   void com_compute();
 

@@ -110,7 +110,7 @@ double ComputeTempMol::compute_scalar()
   int i;
   invoked_scalar = update->ntimestep;
 
-  tagint nmolecule = molprop->nmolecule;
+  tagint molmax = molprop->molmax;
   double *molmass = molprop->mass;
 
   // calculate global temperature
@@ -129,13 +129,12 @@ double ComputeTempMol::compute_scalar()
 
   // Tally up the molecule COM velocities to get the kinetic temperature
   double t = ke_singles[0]+ke_singles[1]+ke_singles[2];
-  for (m = 0; m < nmolecule; m++) {
+  for (m = 0; m < molmax; m++) {
     t += (vcmall[m][0]*vcmall[m][0] + vcmall[m][1]*vcmall[m][1] + vcmall[m][2]*vcmall[m][2]) *
           molmass[m];
   }
 
   // final temperature
-  // TODO(SS): Check whether dynamic flag can be correctly set for cases where nmolecule can change
   if (dynamic)
     dof_compute();
   if (dof < 0.0)
@@ -152,7 +151,7 @@ void ComputeTempMol::compute_vector()
 
   invoked_vector = update->ntimestep;
 
-  tagint nmolecule = molprop->nmolecule;
+  tagint molmax = molprop->molmax;
   double *molmass = molprop->mass;
 
   double **v = atom->v;
@@ -171,7 +170,7 @@ void ComputeTempMol::compute_vector()
 
   // Tally up the molecule COM velocities to get the kinetic temperature
   // No need for MPI reductions, since every processor knows the molecule VCMs
-  for (m = 0; m < nmolecule; m++) {
+  for (m = 0; m < molmax; m++) {
       t[0] += molmass[m] * vcmall[m][0] * vcmall[m][0];
       t[1] += molmass[m] * vcmall[m][1] * vcmall[m][1];
       t[2] += molmass[m] * vcmall[m][2] * vcmall[m][2];
@@ -208,9 +207,10 @@ void ComputeTempMol::dof_compute()
       ++nsingle_local;
   MPI_Allreduce(&nsingle_local,&nsingle,1,MPI_LMP_BIGINT,MPI_SUM,world);
 
-  // TODO(SS): nmolecule is currently the max. molecule index, but some indices
-  //           could be skipped which would make this incorrect. Also currently
-  //           incorrect if not all molecules are in the group.
+  // Make sure molecule count is up to date
+  if (molprop->dynamic_group && molprop->count_step != update->ntimestep)
+    molprop->count_molecules();
+  // Calculate dof from number of molecules with at least 1 atom in the group
   dof = domain->dimension * (molprop->nmolecule + nsingle);
 
   dof -= extra_dof; // + fix_dof;
@@ -231,17 +231,22 @@ void ComputeTempMol::vcm_compute(double *ke_singles)
   double massone;
   double unwrap[3];
 
-  // molid = 1 to nmolecule for included atoms, 0 for excluded atoms
+  // molid = 1 to molmax for included atoms, 0 for excluded atoms
   tagint *molecule = atom->molecule;
-  tagint nmolecule = molprop->nmolecule;
+  tagint molmax = molprop->molmax;
+
+  // Update molecular masses if required
+  // Also grows vcm and vcmall if needed
+  if (molprop->dynamic_group && molprop->mass_step != update->ntimestep)
+    molprop->mass_compute();
   double *molmass = molprop->mass;
 
   // Reallocation handled by fix property/molecule.
   // Make sure size is up to date
-  size_array_rows = nmolecule;
+  size_array_rows = molmax;
 
   // zero local per-molecule values
-  for (m = 0; m < nmolecule; m++){
+  for (m = 0; m < molmax; m++){
     vcm[m][0] = vcm[m][1] = vcm[m][2] = 0.0;
   }
 
@@ -282,9 +287,9 @@ void ComputeTempMol::vcm_compute(double *ke_singles)
     }
 
   double ke_total = 0;
-  if (nmolecule > 0) MPI_Allreduce(&vcm[0][0],&vcmall[0][0],3*nmolecule,MPI_DOUBLE,MPI_SUM,world);
+  if (molmax > 0) MPI_Allreduce(&vcm[0][0],&vcmall[0][0],3*molmax,MPI_DOUBLE,MPI_SUM,world);
   if (ke_singles != nullptr) MPI_Allreduce(ke_local,ke_singles,6,MPI_DOUBLE,MPI_SUM,world);
-  for (m = 0; m < nmolecule; m++) {
+  for (m = 0; m < molmax; m++) {
     if (molmass[m] > 0.0) {
       vcmall[m][0] /= molmass[m];
       vcmall[m][1] /= molmass[m];
@@ -304,7 +309,7 @@ double ComputeTempMol::memory_usage()
   double bytes = 0;
   // vcm and vcmall not allocated if property_molecule is nullptr
   if (molprop != nullptr)
-    bytes += (bigint) molprop->nmolecule * 6 * sizeof(double);
+    bytes += (bigint) molprop->molmax * 6 * sizeof(double);
 
   return bytes;
 }
