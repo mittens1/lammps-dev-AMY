@@ -42,8 +42,9 @@ class ComputePressureMol : public Compute {
   double *kspace_virial;
   double virial[9];    // ordering: xx,yy,zz,xy,xz,yz,yx,zx,zy
   double pair_virial[9];
-  int keflag, pairflag;
+  int keflag, pairflag, pairhybridflag;
   int kspaceflag;
+  class Pair *pair_ptr;
 
   Compute *temperature;
   char *id_temp;
@@ -55,6 +56,8 @@ class ComputePressureMol : public Compute {
 
  private:
   bigint did_setup;
+  char *pstyle;
+  int nsub;
 };
 
 }    // namespace LAMMPS_NS

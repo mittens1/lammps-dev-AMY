@@ -28,7 +28,6 @@
 #include "group.h"
 #include "math_extra.h"
 #include "modify.h"
-#include "memory.h"
 
 #include <cstring>
 
@@ -306,16 +305,16 @@ void FixNVTSllodMol::nve_x()
       m = molecule[i]-1;
       if (m < 0) xcom = x[i];
       else {
-        // Need to remap molecular CoM to be nearest image to x[i] so that
-        // streaming velocity is correct, since com stores unwrapped coords
-        // This means that these equations of motion are only correct if
-        // molecules don't extend more than half the box length from their CoM.
-        // Could maybe do something clever with image flags for molecules, but
-        // that would get expensive to calculate them consistently.
+        // CoM stored in unwrapped coords.
+        // Need to wrap to same image as x[i] streaming velocity is correct.
         molcom[0] = com[m][0];
         molcom[1] = com[m][1];
         molcom[2] = com[m][2];
-        domain->remap_near(molcom, x[i]);
+        // Use inverted sign of atom's image to map CoM to correct position
+        imageint ix = (2*IMGMAX - (atom->image[i] & IMGMASK)) & IMGMASK;
+        imageint iy = (2*IMGMAX - (atom->image[i] >> IMGBITS & IMGMASK)) & IMGMASK;
+        imageint iz = (2*IMGMAX - (atom->image[i] >> IMG2BITS)) & IMGMASK;
+        domain->unmap(molcom, ix | (iy << IMGBITS) | (iz << IMG2BITS));
         xcom = molcom;
       }
 
@@ -343,7 +342,10 @@ void FixNVTSllodMol::nve_x()
         molcom[0] = com[m][0];
         molcom[1] = com[m][1];
         molcom[2] = com[m][2];
-        domain->remap_near(molcom, x[i]);
+        imageint ix = (2*IMGMAX - (atom->image[i] & IMGMASK)) & IMGMASK;
+        imageint iy = (2*IMGMAX - (atom->image[i] >> IMGBITS & IMGMASK)) & IMGMASK;
+        imageint iz = (2*IMGMAX - (atom->image[i] >> IMG2BITS)) & IMGMASK;
+        domain->unmap(molcom, ix | (iy << IMGBITS) | (iz << IMG2BITS));
         xcom = molcom;
       }
 

@@ -34,8 +34,8 @@ using namespace LAMMPS_NS;
 const std::vector<std::string> AtomVec::default_grow = {"id", "type", "mask", "image",
                                                         "x",  "v",    "f"};
 const std::vector<std::string> AtomVec::default_copy = {"id", "type", "mask", "image", "x", "v"};
-const std::vector<std::string> AtomVec::default_comm = {"x"};
-const std::vector<std::string> AtomVec::default_comm_vel = {"x", "v"};
+const std::vector<std::string> AtomVec::default_comm = {"x", "image"};
+const std::vector<std::string> AtomVec::default_comm_vel = {"x", "v", "image"};
 const std::vector<std::string> AtomVec::default_reverse = {"f"};
 const std::vector<std::string> AtomVec::default_border = {"id", "type", "mask", "x"};
 const std::vector<std::string> AtomVec::default_border_vel = {"id", "type", "mask", "x", "v"};
@@ -60,6 +60,7 @@ AtomVec::AtomVec(LAMMPS *lmp) : Pointers(lmp)
   maxexchange = 0;
   bonus_flag = 0;
   size_forward_bonus = size_border_bonus = 0;
+  comm_images = 0;
 
   kokkosable = 0;
 
@@ -381,6 +382,26 @@ int AtomVec::pack_comm(int n, int *list, double *buf, int pbc_flag, int *pbc)
     }
   }
 
+  if (comm_images) {
+    if (pbc_flag == 0) {
+      for (i = 0; i < n; i++) {
+        j = list[i];
+        buf[m++] = ubuf(image[j]).d;
+      }
+    } else {
+      for (i = 0; i < n; i++) {
+        j = list[i];
+        imageint xi = (image[j] & IMGMASK) - pbc[0];
+        imageint yi = ((image[j] >> IMGBITS) & IMGMASK) - pbc[1];
+        imageint zi = (image[j] >> IMG2BITS) - pbc[2];
+        imageint img = (xi & IMGMASK) |
+          ((yi & IMGMASK) << IMGBITS) |
+          ((zi & IMGMASK) << IMG2BITS);
+        buf[m++] = ubuf(img).d;
+      }
+    }
+  }
+
   if (ncomm) {
     for (nn = 0; nn < ncomm; nn++) {
       pdata = mcomm.pdata[nn];
@@ -455,6 +476,7 @@ int AtomVec::pack_comm_vel(int n, int *list, double *buf, int pbc_flag, int *pbc
       buf[m++] = v[j][0];
       buf[m++] = v[j][1];
       buf[m++] = v[j][2];
+      if (comm_images) buf[m++] = ubuf(image[j]).d;
     }
   } else {
     if (domain->triclinic == 0) {
@@ -475,6 +497,15 @@ int AtomVec::pack_comm_vel(int n, int *list, double *buf, int pbc_flag, int *pbc
         buf[m++] = v[j][0];
         buf[m++] = v[j][1];
         buf[m++] = v[j][2];
+        if (comm_images) {
+          imageint xi = (image[j] & IMGMASK) - pbc[0];
+          imageint yi = ((image[j] >> IMGBITS) & IMGMASK) - pbc[1];
+          imageint zi = (image[j] >> IMG2BITS) - pbc[2];
+          imageint img = (xi & IMGMASK) |
+            ((yi & IMGMASK) << IMGBITS) |
+            ((zi & IMGMASK) << IMG2BITS);
+          buf[m++] = ubuf(img).d;
+        }
       }
     } else {
       dvx = pbc[0] * h_rate[0] + pbc[5] * h_rate[5] + pbc[4] * h_rate[4];
@@ -493,6 +524,15 @@ int AtomVec::pack_comm_vel(int n, int *list, double *buf, int pbc_flag, int *pbc
           buf[m++] = v[j][0];
           buf[m++] = v[j][1];
           buf[m++] = v[j][2];
+        }
+        if (comm_images) {
+          imageint xi = (image[j] & IMGMASK) - pbc[0];
+          imageint yi = ((image[j] >> IMGBITS) & IMGMASK) - pbc[1];
+          imageint zi = (image[j] >> IMG2BITS) - pbc[2];
+          imageint img = (xi & IMGMASK) |
+            ((yi & IMGMASK) << IMGBITS) |
+            ((zi & IMGMASK) << IMG2BITS);
+          buf[m++] = ubuf(img).d;
         }
       }
     }
@@ -569,6 +609,11 @@ void AtomVec::unpack_comm(int n, int first, double *buf)
     x[i][2] = buf[m++];
   }
 
+  if (comm_images) {
+    for (i = first; i < last; i++)
+      image[i] = (imageint) ubuf(buf[m++]).i;
+  }
+
   if (ncomm) {
     for (nn = 0; nn < ncomm; nn++) {
       pdata = mcomm.pdata[nn];
@@ -624,6 +669,7 @@ void AtomVec::unpack_comm_vel(int n, int first, double *buf)
     v[i][0] = buf[m++];
     v[i][1] = buf[m++];
     v[i][2] = buf[m++];
+    if (comm_images) image[i] = (imageint) ubuf(buf[m++]).i;
   }
 
   if (ncomm_vel) {
@@ -807,6 +853,7 @@ int AtomVec::pack_border(int n, int *list, double *buf, int pbc_flag, int *pbc)
       buf[m++] = ubuf(tag[j]).d;
       buf[m++] = ubuf(type[j]).d;
       buf[m++] = ubuf(mask[j]).d;
+      if (comm_images) buf[m++] = ubuf(image[j]).d;
     }
   } else {
     if (domain->triclinic == 0) {
@@ -826,6 +873,15 @@ int AtomVec::pack_border(int n, int *list, double *buf, int pbc_flag, int *pbc)
       buf[m++] = ubuf(tag[j]).d;
       buf[m++] = ubuf(type[j]).d;
       buf[m++] = ubuf(mask[j]).d;
+      if (comm_images) {
+        imageint xi = (image[j] & IMGMASK) - pbc[0];
+        imageint yi = ((image[j] >> IMGBITS) & IMGMASK) - pbc[1];
+        imageint zi = (image[j] >> IMG2BITS) - pbc[2];
+        imageint img = (xi & IMGMASK) |
+          ((yi & IMGMASK) << IMGBITS) |
+          ((zi & IMGMASK) << IMG2BITS);
+        buf[m++] = ubuf(img).d;
+      }
     }
   }
 
@@ -907,6 +963,7 @@ int AtomVec::pack_border_vel(int n, int *list, double *buf, int pbc_flag, int *p
       buf[m++] = ubuf(tag[j]).d;
       buf[m++] = ubuf(type[j]).d;
       buf[m++] = ubuf(mask[j]).d;
+      buf[m++] = ubuf(image[j]).d;
       buf[m++] = v[j][0];
       buf[m++] = v[j][1];
       buf[m++] = v[j][2];
@@ -930,6 +987,15 @@ int AtomVec::pack_border_vel(int n, int *list, double *buf, int pbc_flag, int *p
         buf[m++] = ubuf(tag[j]).d;
         buf[m++] = ubuf(type[j]).d;
         buf[m++] = ubuf(mask[j]).d;
+        if (comm_images) {
+          imageint xi = (image[j] & IMGMASK) - pbc[0];
+          imageint yi = ((image[j] >> IMGBITS) & IMGMASK) - pbc[1];
+          imageint zi = (image[j] >> IMG2BITS) - pbc[2];
+          imageint img = (xi & IMGMASK) |
+            ((yi & IMGMASK) << IMGBITS) |
+            ((zi & IMGMASK) << IMG2BITS);
+          buf[m++] = ubuf(img).d;
+        }
         buf[m++] = v[j][0];
         buf[m++] = v[j][1];
         buf[m++] = v[j][2];
@@ -946,6 +1012,15 @@ int AtomVec::pack_border_vel(int n, int *list, double *buf, int pbc_flag, int *p
         buf[m++] = ubuf(tag[j]).d;
         buf[m++] = ubuf(type[j]).d;
         buf[m++] = ubuf(mask[j]).d;
+        if (comm_images) {
+          imageint xi = (image[j] & IMGMASK) - pbc[0];
+          imageint yi = ((image[j] >> IMGBITS) & IMGMASK) - pbc[1];
+          imageint zi = (image[j] >> IMG2BITS) - pbc[2];
+          imageint img = (xi & IMGMASK) |
+            ((yi & IMGMASK) << IMGBITS) |
+            ((zi & IMGMASK) << IMG2BITS);
+          buf[m++] = ubuf(img).d;
+        }
         if (mask[i] & deform_groupbit) {
           buf[m++] = v[j][0] + dvx;
           buf[m++] = v[j][1] + dvy;
@@ -1037,6 +1112,7 @@ void AtomVec::unpack_border(int n, int first, double *buf)
     tag[i] = (tagint) ubuf(buf[m++]).i;
     type[i] = (int) ubuf(buf[m++]).i;
     mask[i] = (int) ubuf(buf[m++]).i;
+    if (comm_images) image[i] = (imageint) ubuf(buf[m++]).i;
   }
 
   if (nborder) {
@@ -1100,6 +1176,7 @@ void AtomVec::unpack_border_vel(int n, int first, double *buf)
     tag[i] = (tagint) ubuf(buf[m++]).i;
     type[i] = (int) ubuf(buf[m++]).i;
     mask[i] = (int) ubuf(buf[m++]).i;
+    if (comm_images) image[i] = (imageint) ubuf(buf[m++]).i;
     v[i][0] = buf[m++];
     v[i][1] = buf[m++];
     v[i][2] = buf[m++];

@@ -7,6 +7,7 @@ atom_style full
 bond_style fene
 pair_style lj/cut 2.5
 special_bonds fene
+comm_modify image yes
 
 read_data ${input_dir}/${data_file}
 

@@ -62,6 +62,7 @@ Comm::Comm(LAMMPS *lmp) : Pointers(lmp)
   ncollections = 0;
   ncollections_cutoff = 0;
   ghost_velocity = 0;
+  ghost_imageflags = 0;
 
   user_procgrid[0] = user_procgrid[1] = user_procgrid[2] = 0;
   coregrid[0] = coregrid[1] = coregrid[2] = 1;
@@ -189,7 +190,8 @@ void Comm::init()
 
   comm_x_only = atom->avec->comm_x_only;
   comm_f_only = atom->avec->comm_f_only;
-  if (ghost_velocity) comm_x_only = 0;
+  if (ghost_velocity || ghost_imageflags) comm_x_only = 0;
+  atom->avec->comm_images = ghost_imageflags;
 
   // set per-atom sizes for forward/reverse/border comm
   // augment by velocity and fix quantities if needed
@@ -200,6 +202,8 @@ void Comm::init()
 
   if (ghost_velocity) size_forward += atom->avec->size_velocity;
   if (ghost_velocity) size_border += atom->avec->size_velocity;
+  if (ghost_imageflags) size_forward++;
+  if (ghost_imageflags) size_border++;
 
   const auto &fix_list = modify->get_fix_list();
   for (const auto &fix : fix_list)
@@ -395,6 +399,9 @@ void Comm::modify_params(int narg, char **arg)
     } else if (strcmp(arg[iarg],"vel") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal comm_modify command");
       ghost_velocity = utils::logical(FLERR,arg[iarg+1],false,lmp);
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"image") == 0) {
+      ghost_imageflags = utils::logical(FLERR,arg[iarg+1],false,lmp);
       iarg += 2;
     } else error->all(FLERR,"Illegal comm_modify command");
   }

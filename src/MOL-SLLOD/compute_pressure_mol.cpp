@@ -38,7 +38,8 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 ComputePressureMol::ComputePressureMol(LAMMPS *lmp, int narg, char **arg) :
-  Compute(lmp, narg, arg), id_temp(nullptr), id_molprop(nullptr), molprop(nullptr)
+  Compute(lmp, narg, arg), id_temp(nullptr), id_molprop(nullptr),
+  molprop(nullptr), pstyle(nullptr), pair_ptr(nullptr)
 {
   if (narg < 5) error->all(FLERR,"Illegal compute pressure/mol command");
   if (igroup) error->all(FLERR,"Compute pressure/mol must use group all");
@@ -55,6 +56,7 @@ ComputePressureMol::ComputePressureMol(LAMMPS *lmp, int narg, char **arg) :
   else id_temp = utils::strdup(arg[4]);
 
   // process optional args
+  pairhybridflag = 0;
   if (narg == 5) {
     keflag = 1;
     pairflag = 1;
@@ -66,6 +68,36 @@ ComputePressureMol::ComputePressureMol(LAMMPS *lmp, int narg, char **arg) :
     int iarg = 5;
     while (iarg < narg) {
       if (strcmp(arg[iarg],"ke") == 0) keflag = 1;
+      else if (strcmp(arg[iarg],"pair/hybrid") == 0) {
+        if (lmp->suffix)
+          pstyle = utils::strdup(fmt::format("{}/{}",arg[++iarg],lmp->suffix));
+        else
+          pstyle = utils::strdup(arg[++iarg]);
+
+        nsub = 0;
+
+        if (narg > iarg) {
+          if (isdigit(arg[iarg][0])) {
+            nsub = utils::inumeric(FLERR,arg[iarg],false,lmp);
+            ++iarg;
+            if (nsub <= 0)
+              error->all(FLERR,"Illegal compute pressure/mol command");
+          }
+        }
+
+        // check if pair style with and without suffix exists
+
+        pair_ptr = (Pair *) force->pair_match(pstyle,1,nsub);
+        if (!pair_ptr && lmp->suffix) {
+          pstyle[strlen(pstyle) - strlen(lmp->suffix) - 1] = '\0';
+          pair_ptr = (Pair *) force->pair_match(pstyle,1,nsub);
+        }
+
+        if (!pair_ptr)
+          error->all(FLERR,"Unrecognized pair style in compute pressure/mol command");
+
+        pairhybridflag = 1;
+      }
       else if (strcmp(arg[iarg],"pair") == 0) pairflag = 1;
       else if (strcmp(arg[iarg],"kspace") == 0) kspaceflag = 1;
       else if (strcmp(arg[iarg],"virial") == 0) {
@@ -79,8 +111,13 @@ ComputePressureMol::ComputePressureMol(LAMMPS *lmp, int narg, char **arg) :
 
   // error check
   if (keflag && id_temp == nullptr)
-    error->all(FLERR,"Compute pressure requires temperature ID "
+    error->all(FLERR,"Compute pressure/mol requires temperature ID "
                "to include kinetic energy");
+
+  // pairflag + pairhybridflag would mean double-counting
+  if (pairflag && pairhybridflag)
+    error->all(FLERR,"The 'pairhybrid' option is incompatible with the 'pair' "
+        "and 'virial' options for compute pressure/mol");
 
   vector = new double[size_vector];
 }
@@ -89,44 +126,21 @@ ComputePressureMol::ComputePressureMol(LAMMPS *lmp, int narg, char **arg) :
 
 ComputePressureMol::~ComputePressureMol()
 {
-  if (force && force->pair) force->pair->del_tally_callback(this);
+  if (force && force->pair) pair_ptr->del_tally_callback(this);
   delete [] id_temp;
   delete [] id_molprop;
   delete [] vector;
+  delete [] pstyle;
 }
 
 /* ---------------------------------------------------------------------- */
 
 void ComputePressureMol::init()
 {
-  if (pairflag) {
+  if (pairflag || pairhybridflag) {
     if (force->pair == nullptr)
       error->all(FLERR, "Trying to use compute pressure/mol without pair style");
-    else
-      force->pair->add_tally_callback(this);
   }
-
-  if (comm->me == 0) {
-    if (pairflag && force->pair->single_enable == 0 || force->pair->manybody_flag)
-      error->warning(FLERR,"Compute pressure/mol used with incompatible pair style");
-
-    if (kspaceflag && force->kspace)
-      error->warning(FLERR,"Compute pressure/mol does not yet handle kspace forces");
-
-    // Check for fixes that contribute to the virial (currently not handled)
-    for (auto &ifix : modify->get_fix_list())
-      if (ifix->thermo_virial)
-        error->warning(FLERR,
-            "Compute pressure/mol does not account for fix virial "
-            "contributions. This warning can be safely ignored for fixes that "
-            "only contribute intramolecular forces");
-
-  }
-  did_setup = -1;
-
-  boltz = force->boltz;
-  nktv2p = force->nktv2p;
-  dimension = domain->dimension;
 
   // set temperature compute, must be done in init()
   // fixes could have changed or compute_modify could have changed it
@@ -140,6 +154,26 @@ void ComputePressureMol::init()
     temperature = modify->compute[icompute];
   }
 
+  // recheck if pair style with and without suffix exists
+  if (pairhybridflag) {
+    pair_ptr = (Pair *) force->pair_match(pstyle,1,nsub);
+    if (!pair_ptr && lmp->suffix) {
+      strcat(pstyle,"/");
+      strcat(pstyle,lmp->suffix);
+      pair_ptr = (Pair *) force->pair_match(pstyle,1,nsub);
+    }
+
+    if (!pair_ptr)
+      error->all(FLERR,"Unrecognized pair style in compute pressure/mol command");
+
+    auto ph = dynamic_cast<PairHybrid *>( force->pair);
+    ph->no_virial_fdotr_compute = 1;
+  } else {
+    pair_ptr = force->pair;
+  }
+  if (pairflag || pairhybridflag)
+    pair_ptr->add_tally_callback(this);
+
   // find fix property/mol
   molprop = dynamic_cast<FixPropertyMol*>(modify->get_fix_by_id(id_molprop));
   if (molprop == nullptr) // TODO(SS): Check that this fails when given an incorrect fix type
@@ -149,13 +183,43 @@ void ComputePressureMol::init()
   // Make sure CoM can be computed
   molprop->request_com();
 
-  // Tally callback doesn't work with fdotr virial.
-  // Could theoretically use it for molecular virial if it existed.
-  if (pairflag) force->pair->no_virial_fdotr_compute = 1;
+  // Make sure ghost atoms have image flags.
+  // Needed to map CoM to same image as ghost atoms.
+  if (!comm->ghost_imageflags)
+    error->all(FLERR, "Fix property/mol requires image flags to be communicated. "
+        "Use comm_modify image yes to enable this.");
+
+  // Warn about possible incompatibilities
+  if (comm->me == 0) {
+    // Check for tally callback issues
+    if ((pairflag || pairhybridflag) &&
+        pair_ptr->single_enable == 0 ||
+        pair_ptr->manybody_flag)
+      error->warning(FLERR,"Compute pressure/mol used with incompatible pair style");
+
+    // Check for fixes that contribute to the virial (currently not handled)
+    for (auto &ifix : modify->get_fix_list()) {
+      if (ifix->thermo_virial)
+        error->warning(FLERR,
+            "Compute pressure/mol does not account for fix virial "
+            "contributions. This warning can be safely ignored for fixes that "
+            "only contribute intramolecular forces");
+    }
+
+    // kspace not yet supported
+    if (kspaceflag && force->kspace)
+      error->warning(FLERR,"Compute pressure/mol does not yet handle kspace forces");
+  }
+  did_setup = -1;
+
+  boltz = force->boltz;
+  nktv2p = force->nktv2p;
+  dimension = domain->dimension;
 
   // flag Kspace contribution separately, since not summed across procs
-  if (kspaceflag && force->kspace) kspace_virial = force->kspace->virial;
-  else kspace_virial = nullptr;
+  if (kspaceflag && force->kspace) {
+    kspace_virial = force->kspace->virial;
+  } else kspace_virial = nullptr;
 }
 
 /* ----------------------------------------------------------------------
@@ -269,7 +333,7 @@ void ComputePressureMol::virial_compute(int n, int ndiag)
 
   // sum contributions to virial from pair forces
 
-  if (pairflag)
+  if (pairflag || pairhybridflag)
     for (i = 0; i < n; i++) v[i] += pair_virial[i];
 
   // sum virial across procs
@@ -285,8 +349,8 @@ void ComputePressureMol::virial_compute(int n, int ndiag)
   // LJ long-range tail correction, only if pair contributions are included
   // TODO(SS): Check that this is correct
 
-  if (force->pair && pairflag && force->pair->tail_flag)
-    for (i = 0; i < ndiag; i++) virial[i] += force->pair->ptail * inv_volume;
+  if ((pairflag || pairhybridflag) && pair_ptr->tail_flag)
+    for (i = 0; i < ndiag; i++) virial[i] += pair_ptr->ptail * inv_volume;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -329,17 +393,17 @@ void ComputePressureMol::pair_tally_callback(int i, int j, int nlocal,
   tagint mol_i = atom->molecule[i]-1;
   tagint mol_j = atom->molecule[j]-1;
 
-  // com is stored in unwrapped coordinates, so need to map near each other
-  // NOTE: this assumes that an atom is always closer to the CoM of the
-  //       molecule it belongs to than to any image of that CoM. This may not
-  //       hold for molecules that are longer than half the box length.
+  // CoM is stored in unwrapped coordinates. Need to map to same image as atom
   double *com_i, *com_j, com_tmp_i[3], com_tmp_j[3];
   if (mol_i < 0) com_i = atom->x[i];
   else {
     com_tmp_i[0] = com[mol_i][0];
     com_tmp_i[1] = com[mol_i][1];
     com_tmp_i[2] = com[mol_i][2];
-    domain->remap_near(com_tmp_i, atom->x[i]);
+    imageint ix = (2*IMGMAX - (atom->image[i] & IMGMASK)) & IMGMASK;
+    imageint iy = (2*IMGMAX - (atom->image[i] >> IMGBITS & IMGMASK)) & IMGMASK;
+    imageint iz = (2*IMGMAX - (atom->image[i] >> IMG2BITS)) & IMGMASK;
+    domain->unmap(com_tmp_i, ix | (iy << IMGBITS) | (iz << IMG2BITS));
     com_i = com_tmp_i;
   }
   if (mol_j < 0) com_j = atom->x[j];
@@ -347,7 +411,10 @@ void ComputePressureMol::pair_tally_callback(int i, int j, int nlocal,
     com_tmp_j[0] = com[mol_j][0];
     com_tmp_j[1] = com[mol_j][1];
     com_tmp_j[2] = com[mol_j][2];
-    domain->remap_near(com_tmp_j, atom->x[j]);
+    imageint ix = (2*IMGMAX - (atom->image[j] & IMGMASK)) & IMGMASK;
+    imageint iy = (2*IMGMAX - (atom->image[j] >> IMGBITS & IMGMASK)) & IMGMASK;
+    imageint iz = (2*IMGMAX - (atom->image[j] >> IMG2BITS)) & IMGMASK;
+    domain->unmap(com_tmp_j, ix | (iy << IMGBITS) | (iz << IMG2BITS));
     com_j = com_tmp_j;
   }
 
