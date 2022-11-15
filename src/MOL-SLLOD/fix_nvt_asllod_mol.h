@@ -13,22 +13,21 @@
 
 #ifdef FIX_CLASS
 // clang-format off
-FixStyle(nvt/sllod/mol,FixNVTSllodMol);
-FixStyle(nvt/m-sllod/mol,FixNVTSllodMol);
+FixStyle(nvt/a-sllod/mol,FixNVTAsllodMol);
 // clang-format on
 #else
 
-#ifndef LMP_FIX_NVT_SLLOD_MOL_H
-#define LMP_FIX_NVT_SLLOD_MOL_H
+#ifndef LMP_FIX_NVT_ASLLOD_MOL_H
+#define LMP_FIX_NVT_ASLLOD_MOL_H
 
 #include "fix_nh.h"
 
 namespace LAMMPS_NS {
 
-class FixNVTSllodMol : public FixNH {
+class FixNVTAsllodMol : public FixNH {
  public:
-  FixNVTSllodMol(class LAMMPS *, int, char **);
-  ~FixNVTSllodMol();
+  FixNVTAsllodMol(class LAMMPS *, int, char **);
+  ~FixNVTAsllodMol();
   void post_constructor() override;
 
   void init() override;
@@ -36,7 +35,6 @@ class FixNVTSllodMol : public FixNH {
  protected:
   int molpropflag;    // 1 = molprop created by nvt/sllod/mol, 0 = user supplied
   char *id_molprop;   // Name of property/molecule fix
-  class FixPropertyMol *molprop;
 
  private:
   void nh_v_temp() override;

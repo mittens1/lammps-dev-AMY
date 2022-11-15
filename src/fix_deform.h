@@ -87,6 +87,7 @@ class FixDeform : public Fix {
   // For correctness checking of set[i].style
   friend class FixNVTSllod;
   friend class FixNVTSllodMol;
+  friend class FixNVTAsllodMol;
 };
 
 }    // namespace LAMMPS_NS
