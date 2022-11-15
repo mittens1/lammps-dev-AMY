@@ -51,8 +51,9 @@ class FixPropertyMol : public Fix {
   // Call to deallocate memory when no longer required
   void destroy_permolecule(void*);
 
-  // Calculate nmolecule and grow permolecule vectors/arrays as needed
-  void grow_permolecule(int=0);
+  // Calculate nmolecule and grow permolecule vectors/arrays as needed.
+  // Return true if max. mol id changed.
+  bool grow_permolecule(int=0);
 
   double *mass;           // per molecule mass
   double **com;           // per molecule center of mass in unwrapped coords
@@ -60,7 +61,7 @@ class FixPropertyMol : public Fix {
   bigint com_step;        // last step where com was updated
 
   tagint molmax;          // Max. molecule id
-  
+
   int dynamic_group;      // 1 = group is dynamic (nmolecule could change)
   int dynamic_mols;       // 1 = number of molecules could change during run
 

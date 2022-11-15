@@ -176,7 +176,7 @@ void ComputePressureMol::init()
 
   // find fix property/mol
   molprop = dynamic_cast<FixPropertyMol*>(modify->get_fix_by_id(id_molprop));
-  if (molprop == nullptr) // TODO(SS): Check that this fails when given an incorrect fix type
+  if (molprop == nullptr)
     error->all(FLERR, "Compute pressure/mol could not find a fix property/mol with id {}", id_molprop);
   if (igroup != molprop->igroup)
     error->all(FLERR, "Compute pressure/mol must be defined for the same group as fix nvt/sllod/mol");

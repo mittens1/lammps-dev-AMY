@@ -84,7 +84,7 @@ void ComputeTempMol::init()
 {
   // Get id of molprop
   molprop = dynamic_cast<FixPropertyMol*>(modify->get_fix_by_id(id_molprop));
-  if (molprop == nullptr) // TODO(SS): Check that this fails when given an incorrect fix type
+  if (molprop == nullptr)
     error->all(FLERR, "Compute temp/mol could not find a fix property/mol with id {}", id_molprop);
   // if (!molprop->mass_flag)
   //   error->all(FLERR, "Compute temp/mol requires fix property/mol with the mass or com flag");
@@ -209,8 +209,14 @@ void ComputeTempMol::dof_compute()
   MPI_Allreduce(&nsingle_local,&nsingle,1,MPI_LMP_BIGINT,MPI_SUM,world);
 
   // Make sure molecule count is up to date
-  if (molprop->dynamic_group && molprop->count_step != update->ntimestep)
-    molprop->count_molecules();
+  if (molprop->dynamic_group || molprop->dynamic_mols) {
+      if (molprop->count_step != update->ntimestep) {
+        if (molprop->mass_step != update->ntimestep)
+          molprop->mass_compute();
+        molprop->count_molecules();
+      }
+  }
+
   // Calculate dof from number of molecules with at least 1 atom in the group
   dof = domain->dimension * (molprop->nmolecule + nsingle);
 
@@ -238,7 +244,8 @@ void ComputeTempMol::vcm_compute(double *ke_singles)
 
   // Update molecular masses if required
   // Also grows vcm and vcmall if needed
-  if (molprop->dynamic_group && molprop->mass_step != update->ntimestep)
+  if ( (molprop->dynamic_group || molprop->dynamic_mols)
+      && molprop->mass_step != update->ntimestep)
     molprop->mass_compute();
   double *molmass = molprop->mass;
 

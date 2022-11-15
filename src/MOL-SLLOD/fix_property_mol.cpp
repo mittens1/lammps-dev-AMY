@@ -38,6 +38,8 @@ FixPropertyMol::FixPropertyMol(LAMMPS *lmp, int narg, char **arg) :
 
   mass_flag = 0;
   com_flag = 0;
+
+  dynamic_group_allow = 1;
   dynamic_group = group->dynamic[igroup];
   dynamic_mols = 0;
 
@@ -49,7 +51,10 @@ FixPropertyMol::FixPropertyMol(LAMMPS *lmp, int narg, char **arg) :
       request_com();
       iarg++;
     } else if (strcmp(arg[iarg], "dynamic") == 0) {
-      dynamic_mols = 1;
+      if (++iarg >= narg)
+        error->all(FLERR, "Illegal fix property/mol command. "
+            "Expected value after 'dynamic' keyword");
+      dynamic_mols = utils::logical(FLERR, arg[iarg], false, lmp);
       iarg++;
     } else error->all(FLERR, "Illegal fix property/mol command");
   }
@@ -158,7 +163,9 @@ void FixPropertyMol::init()
    could rely on the memory being allocated (e.g. for virial tallying)
 ---------------------------------------------------------------------- */
 void FixPropertyMol::setup_pre_force(int /*vflag*/) {
+  dynamic_group = group->dynamic[igroup];
   grow_permolecule();
+
   // com_compute also computes mass if dynamic_group is set
   // so no need to call mass_compute in that case
   if (mass_flag && !dynamic_group) mass_compute();
@@ -175,9 +182,10 @@ void FixPropertyMol::setup_pre_force_respa(int vflag, int ilevel) {
    Calculate number of molecules and grow permolecule arrays if needed.
    Grows to the maximum of previous max. mol id + grow_by and new max. mol id
    if either is larger than nmax.
+   Returns true if the number of molecules (max. mol id) changed.
 ------------------------------------------------------------------------- */
 
-void FixPropertyMol::grow_permolecule(int grow_by) {
+bool FixPropertyMol::grow_permolecule(int grow_by) {
   // Calculate maximum molecule id
   tagint *molecule = atom->molecule;
   int nlocal = atom->nlocal;
@@ -189,6 +197,7 @@ void FixPropertyMol::grow_permolecule(int grow_by) {
   if (maxall > MAXSMALLINT)
     error->all(FLERR, "Molecule IDs too large for fix property/mol");
 
+  tagint old_molmax = molmax;
   tagint new_size = molmax + grow_by;
   molmax = maxall;
   new_size = MAX(molmax, new_size);
@@ -200,6 +209,7 @@ void FixPropertyMol::grow_permolecule(int grow_by) {
   }
 
   size_array_rows = static_cast<int>(molmax);
+  return old_molmax != molmax;
 }
 
 
@@ -246,7 +256,10 @@ void FixPropertyMol::mass_compute() {
 
 void FixPropertyMol::com_compute() {
   com_step = update->ntimestep;
-  if (dynamic_mols) grow_permolecule();
+  // Recalculate mass if number of molecules (max. mol id) changed, or if
+  // group is dynamic
+  bool recalc_mass = dynamic_group;
+  if (dynamic_mols) recalc_mass |= grow_permolecule();
   if (molmax == 0) return;
 
   int nlocal = atom->nlocal;
@@ -265,7 +278,7 @@ void FixPropertyMol::com_compute() {
     comproc[m][2] = 0.0;
   }
 
-  if (dynamic_group) {
+  if (recalc_mass) {
     mass_step = update->ntimestep;
     for (tagint m = 0; m < molmax; ++m)
       massproc[m] = 0.0;
@@ -280,17 +293,18 @@ void FixPropertyMol::com_compute() {
 
       // NOTE: if FP error becomes a problem here in long-running
       //       simulations, could maybe do something clever with
-      //       image flags to reduce it, but MPI makes that difficult.
+      //       image flags to reduce it, but MPI makes that difficult,
+      //       and it would mean needing to store image flags for CoM
       domain->unmap(x[i],atom->image[i],unwrap);
       comproc[m][0] += unwrap[0] * massone;
       comproc[m][1] += unwrap[1] * massone;
       comproc[m][2] += unwrap[2] * massone;
-      if (dynamic_group) massproc[m] += massone;
+      if (recalc_mass) massproc[m] += massone;
     }
   }
 
   MPI_Allreduce(&comproc[0][0],&com[0][0],3*molmax,MPI_DOUBLE,MPI_SUM,world);
-  if (dynamic_group) MPI_Allreduce(massproc,mass,molmax,MPI_DOUBLE,MPI_SUM,world);
+  if (recalc_mass) MPI_Allreduce(massproc,mass,molmax,MPI_DOUBLE,MPI_SUM,world);
 
   for (int m = 0; m < molmax; ++m) {
     // Some molecule ids could be skipped (not assigned atoms)

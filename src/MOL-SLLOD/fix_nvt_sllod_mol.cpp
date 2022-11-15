@@ -175,7 +175,7 @@ void FixNVTSllodMol::init() {
 
   // Get id of molprop
   molprop = dynamic_cast<FixPropertyMol*>(modify->get_fix_by_id(id_molprop));
-  if (molprop == nullptr) // TODO(SS): Check that this fails when given an incorrect fix type
+  if (molprop == nullptr)
     error->all(FLERR, "Fix nvt/sllod/mol could not find a fix property/mol with id {}", id_molprop);
   // Make sure CoM can be computed
   molprop->request_com();
