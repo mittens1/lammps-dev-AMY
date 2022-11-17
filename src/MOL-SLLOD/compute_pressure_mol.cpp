@@ -26,6 +26,7 @@
 #include "force.h"
 #include "improper.h"
 #include "kspace.h"
+#include "memory.h"
 #include "modify.h"
 #include "pair.h"
 #include "pair_hybrid.h"
@@ -39,7 +40,7 @@ using namespace LAMMPS_NS;
 
 ComputePressureMol::ComputePressureMol(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg), id_temp(nullptr), id_molprop(nullptr),
-  molprop(nullptr), pstyle(nullptr), pair_ptr(nullptr)
+  molprop(nullptr), pstyle(nullptr), pair_ptr(nullptr), com_peratom(nullptr)
 {
   if (narg < 5) error->all(FLERR,"Illegal compute pressure/mol command");
   if (igroup) error->all(FLERR,"Compute pressure/mol must use group all");
@@ -120,6 +121,7 @@ ComputePressureMol::ComputePressureMol(LAMMPS *lmp, int narg, char **arg) :
         "and 'virial' options for compute pressure/mol");
 
   vector = new double[size_vector];
+  nmax = -1;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -127,6 +129,7 @@ ComputePressureMol::ComputePressureMol(LAMMPS *lmp, int narg, char **arg) :
 ComputePressureMol::~ComputePressureMol()
 {
   if (force && force->pair) pair_ptr->del_tally_callback(this);
+  if (com_peratom) memory->destroy(com_peratom);
   delete [] id_temp;
   delete [] id_molprop;
   delete [] vector;
@@ -371,6 +374,29 @@ void ComputePressureMol::pair_setup_callback(int eflag, int vflag) {
   // Make sure CoM is up to date
   if (molprop->com_step != update->ntimestep)
     molprop->com_compute();
+
+  // Pre-compute CoM positions for each atom
+  if (atom->nmax > nmax) {
+    nmax = atom->nmax;
+    memory->grow(com_peratom, nmax, 3, "pressure/mol:com_peratom");
+  }
+  for (int i = 0; i < atom->nghost; ++i) {
+    tagint m = atom->molecule[i]-1;
+    if (m < 0) {
+      com_peratom[i][0] = atom->x[i][0];
+      com_peratom[i][1] = atom->x[i][1];
+      com_peratom[i][2] = atom->x[i][2];
+    } else {
+      com_peratom[i][0] = molprop->com[m][0];
+      com_peratom[i][1] = molprop->com[m][1];
+      com_peratom[i][2] = molprop->com[m][2];
+      // CoM is stored in unwrapped coordinates. Need to map to same image as atom
+      imageint ix = (2*IMGMAX - (atom->image[i] & IMGMASK)) & IMGMASK;
+      imageint iy = (2*IMGMAX - (atom->image[i] >> IMGBITS & IMGMASK)) & IMGMASK;
+      imageint iz = (2*IMGMAX - (atom->image[i] >> IMG2BITS)) & IMGMASK;
+      domain->unmap(com_peratom[i], ix | (iy << IMGBITS) | (iz << IMG2BITS));
+    }
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -388,38 +414,9 @@ void ComputePressureMol::pair_tally_callback(int i, int j, int nlocal,
   if (did_setup != update->ntimestep) return;
 
   double delcom[3], v[9];
-  double **com = molprop->com;
-
-  tagint mol_i = atom->molecule[i]-1;
-  tagint mol_j = atom->molecule[j]-1;
-
-  // CoM is stored in unwrapped coordinates. Need to map to same image as atom
-  double *com_i, *com_j, com_tmp_i[3], com_tmp_j[3];
-  if (mol_i < 0) com_i = atom->x[i];
-  else {
-    com_tmp_i[0] = com[mol_i][0];
-    com_tmp_i[1] = com[mol_i][1];
-    com_tmp_i[2] = com[mol_i][2];
-    imageint ix = (2*IMGMAX - (atom->image[i] & IMGMASK)) & IMGMASK;
-    imageint iy = (2*IMGMAX - (atom->image[i] >> IMGBITS & IMGMASK)) & IMGMASK;
-    imageint iz = (2*IMGMAX - (atom->image[i] >> IMG2BITS)) & IMGMASK;
-    domain->unmap(com_tmp_i, ix | (iy << IMGBITS) | (iz << IMG2BITS));
-    com_i = com_tmp_i;
-  }
-  if (mol_j < 0) com_j = atom->x[j];
-  else {
-    com_tmp_j[0] = com[mol_j][0];
-    com_tmp_j[1] = com[mol_j][1];
-    com_tmp_j[2] = com[mol_j][2];
-    imageint ix = (2*IMGMAX - (atom->image[j] & IMGMASK)) & IMGMASK;
-    imageint iy = (2*IMGMAX - (atom->image[j] >> IMGBITS & IMGMASK)) & IMGMASK;
-    imageint iz = (2*IMGMAX - (atom->image[j] >> IMG2BITS)) & IMGMASK;
-    domain->unmap(com_tmp_j, ix | (iy << IMGBITS) | (iz << IMG2BITS));
-    com_j = com_tmp_j;
-  }
 
   for (int d = 0; d < 3; d++) {
-    delcom[d] = com_i[d] - com_j[d];
+    delcom[d] = com_peratom[i][d] - com_peratom[j][d];
   }
 
   v[0] = delcom[0]*delx*fpair;

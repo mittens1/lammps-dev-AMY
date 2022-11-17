@@ -52,6 +52,9 @@ class ComputePressureMol : public Compute {
   class FixPropertyMol *molprop;
   char *id_molprop;
 
+  int nmax;
+  double **com_peratom;
+
   void virial_compute(int, int);
 
  private:
