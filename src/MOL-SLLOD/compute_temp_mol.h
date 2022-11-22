@@ -49,8 +49,6 @@ class ComputeTempMol : public Compute {
 
   double **vcm;
 
-  bool has_warned; // true = warning has been given about ignoring fix_dof
-
   void dof_compute();
   void allocate();
 };
