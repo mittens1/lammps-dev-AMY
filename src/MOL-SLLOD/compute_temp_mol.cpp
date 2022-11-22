@@ -53,6 +53,7 @@ ComputeTempMol::ComputeTempMol(LAMMPS *lmp, int narg, char **arg) :
 
   adof = domain->dimension;
   cdof = 0.0;
+  has_warned = false;
 
   // vector data
   vector = new double[size_vector];
@@ -195,10 +196,13 @@ void ComputeTempMol::dof_compute()
   //           into calculating the number of intermolecular constraints which
   //           should be counted.
   adjust_dof_fix();
-  if (fix_dof != 0)
-    error->warning(FLERR,"Ignoring dof constraints due to fixes in compute "
-        "temp/mol. These must be accounted for manually since intramolecular "
-        "constraints should be ignored.");
+  if (fix_dof != 0 && !has_warned) {
+    has_warned = true;
+    if (comm->me == 0)
+      error->warning(FLERR,"Ignoring dof constraints due to fixes in compute "
+          "temp/mol. These must be accounted for manually since intramolecular "
+          "constraints should be ignored.");
+  }
 
   // Count atoms in the group that aren't part of a molecule
   int *mask = atom->mask;

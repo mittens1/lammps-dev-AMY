@@ -19,6 +19,7 @@
 #include "fix_nvt_sllod_mol.h"
 
 #include "atom.h"
+#include "comm.h"
 #include "compute.h"
 #include "compute_temp_mol.h"
 #include "domain.h"
@@ -152,22 +153,24 @@ void FixNVTSllodMol::init() {
           if (elongation)
             error->all(FLERR,"fix nvt/sllod/mol requires the erate style for "
                 "xy/xz/yz deformation under mixed shear/extensional flow");
-          else
+          else if (comm->me == 0)
             error->warning(FLERR,
                 "Using non-constant shear rate with fix nvt/sllod/mol");
         }
       }
-      if (def->set[5].style && def->set[5].rate != 0.0 &&
-          (def->set[3].style || domain->yz != 0.0) &&
-          (def->set[4].style != ERATE || def->set[5].style != ERATE
-           || (def->set[3].style && def->set[3].style != ERATE))
-          )
-        error->warning(FLERR,"Shearing xy with a yz tilt is only handled "
-            "correctly if fix deform uses the erate style for xy, xz and yz");
-      if (def->end_flag)
-        error->warning(FLERR,"SLLOD equations of motion require box deformation"
-            " to occur with position updates to be strictly correct. Set the N"
-            " parameter of fix deform to 0 to enable this.");
+      if (comm->me == 0) {
+        if (def->set[5].style && def->set[5].rate != 0.0 &&
+            (def->set[3].style || domain->yz != 0.0) &&
+            (def->set[4].style != ERATE || def->set[5].style != ERATE
+             || (def->set[3].style && def->set[3].style != ERATE))
+            )
+          error->warning(FLERR,"Shearing xy with a yz tilt is only handled "
+              "correctly if fix deform uses the erate style for xy, xz and yz");
+        if (def->end_flag)
+          error->warning(FLERR,"SLLOD equations of motion require box deformation"
+              " to occur with position updates to be strictly correct. Set the N"
+              " parameter of fix deform to 0 to enable this.");
+      }
       break;
     }
   if (i == modify->nfix)
