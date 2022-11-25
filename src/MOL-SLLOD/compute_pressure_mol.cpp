@@ -364,6 +364,8 @@ void ComputePressureMol::reset_extra_compute_fix(const char *id_new)
   id_temp = utils::strdup(id_new);
 }
 
+/* ---------------------------------------------------------------------- */
+
 void ComputePressureMol::pair_setup_callback(int eflag, int vflag) {
   if (did_setup == update->ntimestep || !matchstep(update->ntimestep)) return;
   did_setup = update->ntimestep;
@@ -380,7 +382,7 @@ void ComputePressureMol::pair_setup_callback(int eflag, int vflag) {
     nmax = atom->nmax;
     memory->grow(com_peratom, nmax, 3, "pressure/mol:com_peratom");
   }
-  for (int i = 0; i < atom->nghost; ++i) {
+  for (int i = 0; i < atom->nlocal + atom->nghost; ++i) {
     tagint m = atom->molecule[i]-1;
     if (m < 0) {
       com_peratom[i][0] = atom->x[i][0];
