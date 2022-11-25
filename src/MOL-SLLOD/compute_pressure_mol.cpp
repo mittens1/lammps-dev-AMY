@@ -415,10 +415,13 @@ void ComputePressureMol::pair_tally_callback(int i, int j, int nlocal,
   // Virial does not need to be tallied if we didn't do setup this step
   if (did_setup != update->ntimestep) return;
 
-  double delcom[3], v[9];
+  // No virial contribution if i and j both not owned
+  if (i >= nlocal && j >= nlocal) return;
 
+  double delcom[3], v[9];
+  double scale = (newton_pair || (i < nlocal && j < nlocal)) ? 1.0 : 0.5;
   for (int d = 0; d < 3; d++) {
-    delcom[d] = com_peratom[i][d] - com_peratom[j][d];
+    delcom[d] = scale * (com_peratom[i][d] - com_peratom[j][d]);
   }
 
   v[0] = delcom[0]*delx*fpair;
@@ -431,38 +434,6 @@ void ComputePressureMol::pair_tally_callback(int i, int j, int nlocal,
   v[7] = delcom[2]*delx*fpair;
   v[8] = delcom[2]*dely*fpair;
 
-  if (newton_pair) {
-    pair_virial[0] += v[0];
-    pair_virial[1] += v[1];
-    pair_virial[2] += v[2];
-    pair_virial[3] += v[3];
-    pair_virial[4] += v[4];
-    pair_virial[5] += v[5];
-    pair_virial[6] += v[6];
-    pair_virial[7] += v[7];
-    pair_virial[8] += v[8];
-  } else {
-    if (i < nlocal) {
-      pair_virial[0] += 0.5*v[0];
-      pair_virial[1] += 0.5*v[1];
-      pair_virial[2] += 0.5*v[2];
-      pair_virial[3] += 0.5*v[3];
-      pair_virial[4] += 0.5*v[4];
-      pair_virial[5] += 0.5*v[5];
-      pair_virial[6] += 0.5*v[6];
-      pair_virial[7] += 0.5*v[7];
-      pair_virial[8] += 0.5*v[8];
-    }
-    if (j < nlocal) {
-      pair_virial[0] += 0.5*v[0];
-      pair_virial[1] += 0.5*v[1];
-      pair_virial[2] += 0.5*v[2];
-      pair_virial[3] += 0.5*v[3];
-      pair_virial[4] += 0.5*v[4];
-      pair_virial[5] += 0.5*v[5];
-      pair_virial[6] += 0.5*v[6];
-      pair_virial[7] += 0.5*v[7];
-      pair_virial[8] += 0.5*v[8];
-    }
-  }
+  for (int d = 0; d < 9; ++d)
+    pair_virial[d] += v[d];
 }
