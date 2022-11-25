@@ -190,12 +190,7 @@ uninterrupted fashion.
 
 This fix can be used with the :doc:`fix_modify <fix_modify>` *temp* and
 *press* options. The temperature and pressure computes used must be of
-type *temp/uef* and *pressure/uef*\ . It can also be used with the *erate*
-option as follows to specify a new strain rate.
-
-.. code-block:: LAMMPS
-
-   fix_modify f1 erate 0.5 0.5
+type *temp/uef* and *pressure/uef*\ .
 
 This fix computes the same global scalar and vector quantities as :doc:`fix npt <fix_nh>`.
 
