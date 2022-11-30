@@ -125,7 +125,7 @@ void FixNVTSllod::init()
                    "remap option");
       bool elongation = false;
       for (int j = 0; j < 3; ++j) {
-        if (def->set[i].style) {
+        if (def->set[j].style) {
           elongation = true;
           if (def->set[j].style != TRATE)
             error->all(FLERR,"fix nvt/sllod requires the trate style for "
