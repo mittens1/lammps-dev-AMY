@@ -34,19 +34,34 @@ class FixDeform : public Fix {
   int setmask() override;
   void init() override;
   void pre_exchange() override;
+  void post_integrate() override;
+  void post_integrate_respa(int, int) override;
   void end_of_step() override;
   void write_restart(FILE *) override;
   void restart(char *buf) override;
   double memory_usage() override;
 
  protected:
+  void update_box();
+  double calc_xz_correction(double);
+
   int triclinic, scaleflag, flipflag;
   int flip, flipxy, flipxz, flipyz;
   double *h_rate, *h_ratelo;
+  int end_flag;                  // 1 if box update at end_of_step, 0 if post_integrate
   int varflag;                   // 1 if VARIABLE option is used, 0 if not
   int kspace_flag;               // 1 if KSpace invoked, 0 if not
   std::vector<Fix *> rfix;       // pointers to rigid fixes
   class Irregular *irregular;    // for migrating atoms after box flips
+
+  int nlevels_respa;
+  double *step_respa;
+  int nloop0_respa;
+  int kspace_level_respa;
+  bigint nsteps, nsteps_total;
+  int allow_flip_change;        // For rRESPA - flip can only change in outer step
+  int need_flip_change;
+  double dt;
 
   double TWOPI;
 
@@ -68,6 +83,11 @@ class FixDeform : public Fix {
   Set *set;
 
   void options(int, char **);
+
+  // For correctness checking of set[i].style
+  friend class FixNVTSllod;
+  friend class FixNVTSllodMol;
+  friend class FixNVTAsllodMol;
 };
 
 }    // namespace LAMMPS_NS

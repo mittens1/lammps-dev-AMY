@@ -493,6 +493,7 @@ void WriteRestart::header()
   write_int(COMM_MODE,comm->mode);
   write_double(COMM_CUTOFF,comm->cutghostuser);
   write_int(COMM_VEL,comm->ghost_velocity);
+  write_int(COMM_IMG,comm->ghost_imageflags);
 
   write_int(EXTRA_BOND_PER_ATOM,atom->extra_bond_per_atom);
   write_int(EXTRA_ANGLE_PER_ATOM,atom->extra_angle_per_atom);

@@ -24,12 +24,10 @@
 #include "compute.h"
 #include "domain.h"
 #include "error.h"
-#include "fix_property_molecule.h"
 #include "force.h"
 #include "kspace.h"
 #include "math_const.h"
 #include "memory.h"
-#include "modify.h"
 #include "neighbor.h"
 #include "suffix.h"
 #include "update.h"
@@ -129,7 +127,6 @@ Pair::Pair(LAMMPS *lmp) : Pointers(lmp)
 
   kokkosable = 0;
   copymode = 0;
-
 }
 
 /* ---------------------------------------------------------------------- */
@@ -150,7 +147,6 @@ Pair::~Pair()
   memory->destroy(eatom);
   memory->destroy(vatom);
   memory->destroy(cvatom);
-
 }
 
 /* ----------------------------------------------------------------------
@@ -875,8 +871,7 @@ void Pair::map_element2type(int narg, char **arg, bool update_setflag)
                        and centroidstressflag != CENTROID_AVAIL
      cvflag_atom  != 0 if VIRIAL_CENTROID bit of vflag set
                        and centroidstressflag = CENTROID_AVAIL
-     vflag_mol    != 0 if VIRIAL_MOL bit of vflag set
-     vflag_either != 0 if any of vflag_global, vflag_atom, cvflag_atom, vflag_mol is set
+     vflag_either != 0 if any of vflag_global, vflag_atom, cvflag_atom is set
      evflag       != 0 if eflag_either or vflag_either is set
    centroidstressflag is set by the pair style to one of these values:
      CENTROID_SAME = same as two-body stress
@@ -900,9 +895,7 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
   if (vflag & VIRIAL_CENTROID && centroidstressflag != CENTROID_AVAIL) vflag_atom = 1;
   cvflag_atom = 0;
   if (vflag & VIRIAL_CENTROID && centroidstressflag == CENTROID_AVAIL) cvflag_atom = 1;
-  vflag_mol = 0;
-  if (vflag & VIRIAL_MOL) vflag_mol = 1;
-  vflag_either = vflag_global || vflag_atom || cvflag_atom || vflag_mol;
+  vflag_either = vflag_global || vflag_atom || cvflag_atom;
 
   evflag = eflag_either || vflag_either;
 
@@ -966,11 +959,9 @@ void Pair::ev_setup(int eflag, int vflag, int alloc)
       cvatom[i][6] = 0.0;
       cvatom[i][7] = 0.0;
       cvatom[i][8] = 0.0;
-      // cvatom[i][9] = 0.0; // NOTE: Memory allocated as Nx9, so this is probably wrong
     }
   }
 
-  if (vflag_mol) for (int d = 0; d < 9; d++) molecule_virial[d] = 0.0;
   // run ev_setup option for TALLY computes
 
   if (num_tally_compute > 0) {
@@ -1000,7 +991,6 @@ void Pair::ev_unset()
   vflag_atom = 0;
   cvflag_atom = 0;
   vflag_fdotr = 0;
-  vflag_mol = 0;
 }
 
 /* ----------------------------------------------------------------------
@@ -1040,17 +1030,13 @@ void Pair::ev_tally(int i, int j, int nlocal, int newton_pair,
   }
 
   if (vflag_either) {
-    if (vflag_mol) vmol_tally(i, j, nlocal, newton_pair, fpair, delx, dely, delz);
+    v[0] = delx*delx*fpair;
+    v[1] = dely*dely*fpair;
+    v[2] = delz*delz*fpair;
+    v[3] = delx*dely*fpair;
+    v[4] = delx*delz*fpair;
+    v[5] = dely*delz*fpair;
 
-    if (vflag_global || vflag_atom) {
-      v[0] = delx*delx*fpair;
-      v[1] = dely*dely*fpair;
-      v[2] = delz*delz*fpair;
-      v[3] = delx*dely*fpair;
-      v[4] = delx*delz*fpair;
-      v[5] = dely*delz*fpair;
-    }    
-    
     if (vflag_global) {
       if (newton_pair) {
         virial[0] += v[0];
@@ -1097,7 +1083,6 @@ void Pair::ev_tally(int i, int j, int nlocal, int newton_pair,
         vatom[j][5] += 0.5*v[5];
       }
     }
-
   }
 
   if (num_tally_compute > 0) {
@@ -1107,7 +1092,6 @@ void Pair::ev_tally(int i, int j, int nlocal, int newton_pair,
                              evdwl, ecoul, fpair, delx, dely, delz);
     }
   }
-
 }
 
 /* ----------------------------------------------------------------------
@@ -1153,8 +1137,6 @@ void Pair::ev_tally_full(int i, double evdwl, double ecoul, double fpair,
       vatom[i][4] += v[4];
       vatom[i][5] += v[5];
     }
-    // if (vflag_mol) vmol_tally(i, j, nlocal, 0, fpair, delx, dely, delz);
-    // can't tally vflag_mol without knowing j
   }
 }
 
@@ -1249,8 +1231,6 @@ void Pair::ev_tally_xyz(int i, int j, int nlocal, int newton_pair,
         vatom[j][5] += 0.5*v[5];
       }
     }
-
-    if (vflag_mol) vmol_tally_xyz(i, j, nlocal, newton_pair, fx, fy, fz);
   }
 }
 
@@ -1304,8 +1284,6 @@ void Pair::ev_tally_xyz_full(int i, double evdwl, double ecoul,
       vatom[i][4] += v[4];
       vatom[i][5] += v[5];
     }
-    // Can't do full neighbour lists for now without knowing j
-    // if (vflag_mol) vmol_tally_xyz_full(i, 0, fx, fy, fz);
   }
 }
 
@@ -1363,8 +1341,6 @@ void Pair::ev_tally3(int i, int j, int k, double evdwl, double ecoul,
       vatom[k][2] += THIRD*v[2]; vatom[k][3] += THIRD*v[3];
       vatom[k][4] += THIRD*v[4]; vatom[k][5] += THIRD*v[5];
     }
-
-    // Assuming 3 body forces are intramolecular, so no contribution to molecule_virial
   }
 }
 
@@ -1424,8 +1400,6 @@ void Pair::ev_tally4(int i, int j, int k, int m, double evdwl,
       vatom[m][0] += v[0]; vatom[m][1] += v[1]; vatom[m][2] += v[2];
       vatom[m][3] += v[3]; vatom[m][4] += v[4]; vatom[m][5] += v[5];
     }
-
-    // Assuming 4 body forces are intramolecular, so no contribution to molecule_virial
   }
 }
 
@@ -1516,153 +1490,6 @@ void Pair::ev_tally_tip4p(int key, int *list, double *v,
 }
 
 /* ----------------------------------------------------------------------
-   tally molecular virials into global accumulator
-   have delx, dely, delz and fpair (which gives fx, fy, fz)
-   get delcomx, delcomy, delcomz (molecule centre-of-mass separation)
-   from atom->property_molecule
-------------------------------------------------------------------------- */
-
-void Pair::vmol_tally(int i, int j, int nlocal, int newton_pair,
-                          double fpair, double delx, double dely, double delz)
-{
-  if (atom->property_molecule == nullptr ||
-      !atom->property_molecule->com_flag)
-    error->all(FLERR, "calculation of the molecular virial requires a fix property/molecule to be defined with the com option");
-
-  double delcom[3], v[9];
-  double **com = atom->property_molecule->com;
-
-  tagint mol_i = atom->molecule[i]-1;
-  tagint mol_j = atom->molecule[j]-1;
-  double *com_i, *com_j;
-  if (mol_i < 0) com_i = atom->x[i];
-  else com_i = com[mol_i];
-  if (mol_j < 0) com_j = atom->x[j];
-  else com_j = com[mol_j];
-
-  for (int d = 0; d < 3; d++) {
-    delcom[d] = com_i[d] - com_j[d];
-  }
-
-  v[0] = delcom[0]*delx*fpair;
-  v[1] = delcom[1]*dely*fpair;
-  v[2] = delcom[2]*delz*fpair;
-  v[3] = delcom[0]*dely*fpair;
-  v[4] = delcom[0]*delz*fpair;
-  v[5] = delcom[1]*delz*fpair;
-  v[6] = delcom[1]*delx*fpair;
-  v[7] = delcom[2]*delx*fpair;
-  v[8] = delcom[2]*dely*fpair;
-
-  if (newton_pair) {
-    molecule_virial[0] += v[0];
-    molecule_virial[1] += v[1];
-    molecule_virial[2] += v[2];
-    molecule_virial[3] += v[3];
-    molecule_virial[4] += v[4];
-    molecule_virial[5] += v[5];
-    molecule_virial[6] += v[6];
-    molecule_virial[7] += v[7];
-    molecule_virial[8] += v[8];
-  } else {
-    if (i < nlocal) {
-      molecule_virial[0] += 0.5*v[0];
-      molecule_virial[1] += 0.5*v[1];
-      molecule_virial[2] += 0.5*v[2];
-      molecule_virial[3] += 0.5*v[3];
-      molecule_virial[4] += 0.5*v[4];
-      molecule_virial[5] += 0.5*v[5];
-      molecule_virial[6] += 0.5*v[6];
-      molecule_virial[7] += 0.5*v[7];
-      molecule_virial[8] += 0.5*v[8];
-    }
-    if (j < nlocal) {
-      molecule_virial[0] += 0.5*v[0];
-      molecule_virial[1] += 0.5*v[1];
-      molecule_virial[2] += 0.5*v[2];
-      molecule_virial[3] += 0.5*v[3];
-      molecule_virial[4] += 0.5*v[4];
-      molecule_virial[5] += 0.5*v[5];
-      molecule_virial[6] += 0.5*v[6];
-      molecule_virial[7] += 0.5*v[7];
-      molecule_virial[8] += 0.5*v[8];
-    }
-  }
-}
-
-/* ----------------------------------------------------------------------
-   tally molecular virials into global accumulator
-   have fx, fy, fz
-   get delcomx, delcomy, delcomz (molecule centre-of-mass separation)
-   from mols_com
-------------------------------------------------------------------------- */
-
-void Pair::vmol_tally_xyz(int i, int j, int nlocal, int newton_pair,
-                          double fx, double fy, double fz)
-{
-  double delcom[3], v[9];
-  double **com = atom->property_molecule->com;
-
-  tagint mol_i = atom->molecule[i]-1;
-  tagint mol_j = atom->molecule[j]-1;
-
-  double *com_i, *com_j;
-  if (mol_i < 0) com_i = atom->x[i];
-  else com_i = com[i];
-  if (mol_j < 0) com_j = atom->x[j];
-  else com_j = com[j];
-
-  for (int d = 0; d < 3; d++) {
-    delcom[d] = com_i[d] - com_j[d];
-  }
-
-  v[0] = delcom[0]*fx;
-  v[1] = delcom[1]*fy;
-  v[2] = delcom[2]*fz;
-  v[3] = delcom[0]*fy;
-  v[4] = delcom[0]*fz;
-  v[5] = delcom[1]*fz;
-  v[6] = delcom[1]*fx;
-  v[7] = delcom[2]*fx;
-  v[8] = delcom[2]*fy;
-
-  if (newton_pair) {
-    molecule_virial[0] += v[0];
-    molecule_virial[1] += v[1];
-    molecule_virial[2] += v[2];
-    molecule_virial[3] += v[3];
-    molecule_virial[4] += v[4];
-    molecule_virial[5] += v[5];
-    molecule_virial[6] += v[6];
-    molecule_virial[7] += v[7];
-    molecule_virial[8] += v[8];
-  } else {
-    if (i < nlocal) {
-      molecule_virial[0] += 0.5*v[0];
-      molecule_virial[1] += 0.5*v[1];
-      molecule_virial[2] += 0.5*v[2];
-      molecule_virial[3] += 0.5*v[3];
-      molecule_virial[4] += 0.5*v[4];
-      molecule_virial[5] += 0.5*v[5];
-      molecule_virial[6] += 0.5*v[6];
-      molecule_virial[7] += 0.5*v[7];
-      molecule_virial[8] += 0.5*v[8];
-    }
-    if (j < nlocal) {
-      molecule_virial[0] += 0.5*v[0];
-      molecule_virial[1] += 0.5*v[1];
-      molecule_virial[2] += 0.5*v[2];
-      molecule_virial[3] += 0.5*v[3];
-      molecule_virial[4] += 0.5*v[4];
-      molecule_virial[5] += 0.5*v[5];
-      molecule_virial[6] += 0.5*v[6];
-      molecule_virial[7] += 0.5*v[7];
-      molecule_virial[8] += 0.5*v[8];
-    }
-  }
-}
-
-/* ----------------------------------------------------------------------
    tally virial into global or per-atom accumulators
    called by ReaxFF potential, newton_pair is always on
    fi is magnitude of force on atom i, deli is the direction
@@ -1693,9 +1520,6 @@ void Pair::v_tally2_newton(int i, double *fi, double *deli)
     vatom[i][0] += v[0]; vatom[i][1] += v[1]; vatom[i][2] += v[2];
     vatom[i][3] += v[3]; vatom[i][4] += v[4]; vatom[i][5] += v[5];
   }
-  
-  // if (vflag_mol) vmol_tally_xyz ...
-  // doesn't work because ReaxFF doesn't give this function j
 }
 
 /* ----------------------------------------------------------------------
@@ -1736,8 +1560,6 @@ void Pair::v_tally2(int i, int j, double fpair, double *drij)
     vatom[j][0] += v[0]; vatom[j][1] += v[1]; vatom[j][2] += v[2];
     vatom[j][3] += v[3]; vatom[j][4] += v[4]; vatom[j][5] += v[5];
   }
-
-  if (vflag_mol) vmol_tally(i, j, 0, 1, fpair, drij[0], drij[1], drij[2]);
 }
 
 /* ----------------------------------------------------------------------
@@ -2164,7 +1986,6 @@ void Pair::hessian_twobody(double fforce, double dfac, double delr[3], double ph
     }
   }
 }
-
 /* ---------------------------------------------------------------------- */
 
 double Pair::memory_usage()
@@ -2174,3 +1995,4 @@ double Pair::memory_usage()
   bytes += (double)comm->nthreads*maxcvatom*9 * sizeof(double);
   return bytes;
 }
+

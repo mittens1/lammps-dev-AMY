@@ -30,6 +30,7 @@ class Comm : protected Pointers {
 
   int me, nprocs;               // proc info
   int ghost_velocity;           // 1 if ghost atoms have velocity, 0 if not
+  int ghost_imageflags;         // 1 if ghost atoms have image flags, 0 if not
   double cutghost[3];           // cutoffs used for acquiring ghost atoms
   double cutghostuser;          // user-specified ghost cutoff (mode == SINGLE)
   double *cutusermulti;         // per collection user ghost cutoff (mode == MULTI)

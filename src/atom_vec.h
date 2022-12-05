@@ -31,6 +31,7 @@ class AtomVec : protected Pointers {
 
   int comm_x_only;    // 1 if only exchange x in forward comm
   int comm_f_only;    // 1 if only exchange f in reverse comm
+  int comm_images;    // 1 if images should be exchanged in borders & forward comm
 
   int size_forward;      // # of values per atom in comm
   int size_reverse;      // # in reverse comm

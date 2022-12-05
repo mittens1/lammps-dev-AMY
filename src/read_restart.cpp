@@ -838,6 +838,8 @@ void ReadRestart::header()
       comm->cutghostuser = read_double();
     } else if (flag == COMM_VEL) {
       comm->ghost_velocity = read_int();
+    } else if (flag == COMM_IMG) {
+      comm->ghost_imageflags = read_int();
 
     } else if (flag == EXTRA_BOND_PER_ATOM) {
       atom->extra_bond_per_atom = read_int();

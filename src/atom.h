@@ -106,8 +106,6 @@ class Atom : protected Pointers {
   int **improper_type;
   tagint **improper_atom1, **improper_atom2, **improper_atom3, **improper_atom4;
 
-  class FixPropertyMolecule *property_molecule;
-
   // PERI package
 
   double *vfrac, *s0;

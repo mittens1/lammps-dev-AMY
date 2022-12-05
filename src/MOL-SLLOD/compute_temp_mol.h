@@ -13,41 +13,42 @@
 
 #ifdef COMPUTE_CLASS
 // clang-format off
-ComputeStyle(temp/deform/mol,ComputeTempDeformMol);
+ComputeStyle(temp/mol,ComputeTempMol);
 // clang-format on
 #else
 
-#ifndef LMP_COMPUTE_TEMP_DEFORM_MOL_H
-#define LMP_COMPUTE_TEMP_DEFORM_MOL_H
+#ifndef LMP_COMPUTE_TEMP_MOL_H
+#define LMP_COMPUTE_TEMP_MOL_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputeTempDeformMol : public Compute {
+class ComputeTempMol : public Compute {
  public:
-  ComputeTempDeformMol(class LAMMPS *, int, char **);
-  ~ComputeTempDeformMol() override;
+  ComputeTempMol(class LAMMPS *, int, char **);
+  ~ComputeTempMol() override;
   void init() override;
   void setup() override;
   double compute_scalar() override;
   void compute_vector() override;
 
-  void remove_bias(int, double *) override;
-  void remove_bias_all() override;
-  void restore_bias(int, double *) override;
-  void restore_bias_all() override;
-
   double memory_usage() override;
+
+  // TODO(SS): centralise vcm_compute() to fix property/mol?
+  void vcm_compute(double *ke_singles = nullptr);
+  double **vcmall;
+
+ protected:
+  char *id_molprop;
+  class FixPropertyMol *molprop;
 
  private:
   int nmax;
   double adof, cdof, tfactor;
 
-  double **vcm, **vcmall;
-  double **&vthermal = array;
+  double **vcm;
 
-  void vcm_thermal_compute();
   void dof_compute();
   void allocate();
 };

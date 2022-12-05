@@ -350,6 +350,18 @@ FixNH::FixNH(LAMMPS *lmp, int narg, char **arg) :
     } else if (strcmp(arg[iarg],"disc") == 0) {
       iarg++;
 
+    // keywords p_sllod, peculiar are also parsed in fix nvt/sllod
+
+    } else if (strcmp(arg[iarg], "p_sllod") == 0) {
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "peculiar") == 0) {
+      iarg += 2;
+
+    // keyword molprop is also parsed in fix nvt/sllod/mol
+
+    } else if (strcmp(arg[iarg], "molprop") == 0) {
+      iarg += 2;
+
     // keywords erate, strain, and ext are also parsed in fix/nh/uef
 
     } else if (strcmp(arg[iarg],"erate") == 0) {

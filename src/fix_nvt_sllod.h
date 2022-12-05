@@ -32,8 +32,10 @@ class FixNVTSllod : public FixNH {
 
  private:
   int nondeformbias;
+  int p_sllod, peculiar;
 
   void nh_v_temp() override;
+  void nve_x() override;
 };
 
 }    // namespace LAMMPS_NS

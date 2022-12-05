@@ -1,0 +1,66 @@
+echo screen
+units           lj
+timestep        0.001
+atom_style      full
+bond_style      fene
+pair_style      lj/cut 2.5
+pair_modify     shift yes
+special_bonds   fene
+
+read_data "eq.data"
+
+bond_coeff 1 37.0 1.4 1.0 1.0
+pair_coeff 1 1 1.0 1.0 2.5
+mass 1 1.0
+
+velocity all zero linear
+reset_mol_ids all
+
+neigh_modify delay 0 every 1
+comm_modify image yes
+
+variable eps index 0.1
+fix def all deform 0 xy erate ${eps} remap none
+fix sllod all nvt/sllod/mol temp 1.0 1.0 0.1
+
+# Antisymmetric components of the molecular pressure temperature
+# Requires comm_modify image yes
+compute molpress all pressure/mol sllod_molprop sllod_temp
+variable apress0 equal "0.5*(c_molpress[4] - c_molpress[7])"
+variable apress1 equal "0.5*(c_molpress[5] - c_molpress[8])"
+variable apress2 equal "0.5*(c_molpress[6] - c_molpress[9])"
+
+# Momentum should be conserved to numerical precision under pure shear
+compute mom all momentum
+
+# Calculate expected energy dissipation rate based on -V * P^T:∇u
+variable Edot_sllod equal -vol*${eps}*c_molpress[7]
+variable Edot_alpha equal -(c_sllod_temp[1]+c_sllod_temp[2]+c_sllod_temp[3])*f_sllod[2]
+variable Edot_expected equal v_Edot_sllod+v_Edot_alpha
+
+# Get initial energy
+thermo_style custom step temp etotal v_apress0 v_apress1 v_apress2 c_mom[*]
+thermo_modify norm no
+thermo 200
+run 0
+variable Einitial index $(etotal)
+
+# Integrate expected energy dissipation to calculate expected total energy.
+# Also take running average of asymmetric component of pressure tensor, which
+# should approach zero after a long time.
+fix running all ave/time 1 1 1 v_Edot_expected v_apress0 v_apress1 v_apress2 ave running
+variable TotEng_expected equal v_Einitial+f_running[1]*elapsed*dt
+variable av_pxy_pyx equal f_running[2]
+variable av_pxz_pzx equal f_running[3]
+variable av_pyz_pzy equal f_running[4]
+
+thermo_style custom step temp etotal v_TotEng_expected v_av_pxy_pyx v_av_pxz_pzx v_av_pyz_pzy c_mom[*]
+thermo_modify norm no
+
+# Dump the atom positions
+# dump sllod_dump all atom 10 xy_sllod.lammpstrj
+
+# variable Etot equal etotal
+# fix av all ave/time 1 1 1 v_Etot v_Edot_sllod v_Edot_alpha v_Edot_expected file energy_dissipation.csv
+
+run 500
