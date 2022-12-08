@@ -66,13 +66,14 @@ class FixNVTSllodMolKokkos : public FixNHKokkos<DeviceType> {
 
   class FixPropertyMol *molprop;
   class DomainKokkos *domainKK;
-  class AtomKokkos *atomkk; 
+  class AtomKokkos *atomKK; 
 
   typename AT::t_x_array x;
   typename AT::t_x_array xcom;
   typename AT::t_x_array xcom_half;
   typename AT::t_x_array molcom;
   typename AT::t_x_array com;
+  typename AT::t_x_array comm;
   typename AT::t_v_array v;
   typename AT::t_v_array vdelu;
   typename AT::t_v_array vcmall; 

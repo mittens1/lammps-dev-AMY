@@ -107,7 +107,7 @@ FixNVTSllodMolKokkos<DeviceType>::FixNVTSllodMolKokkos(LAMMPS *lmp, int narg, ch
   // id = fix-ID + _temp
   this->id_temp = utils::strdup(std::string(this->id) + "_temp");
   this->modify->add_compute(fmt::format("{} {} temp/mol/kk {}",
-                      this->id_temp, this->group->names[igroup], id_molprop));
+                      this->id_temp, this->group->names[this->igroup], id_molprop));
   this->tcomputeflag = 1;
 }
 
@@ -214,7 +214,7 @@ void FixNVTSllodMolKokkos<DeviceType>::nh_v_temp() {
   //   calculate temperature since some computes require temp
   //   computed on current nlocal atoms to remove bias
 
-  if (which == BIAS) {
+  if (this->which == BIAS) {
     this->temperature->compute_scalar();
     this->temperature->remove_bias_all();
   }
@@ -282,7 +282,7 @@ void FixNVTSllodMolKokkos<DeviceType>::nh_v_temp() {
   Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagFixNVTSllodMolKokkos_compute0>(0, nlocal),*this);
   this->copymode = 1;
 
-  if (which == BIAS) this->temperature->restore_bias_all();
+  if (this->which == BIAS) this->temperature->restore_bias_all();
 }
 
 
@@ -391,7 +391,7 @@ void FixNVTSllodMolKokkos<DeviceType>::nve_x()
 
 template <class DeviceType>
 KOKKOS_INLINE_FUNCTION
-void FixNVTSllodMolKokkos<DeviceType>::operator(TagFixNVTSllodMolKokkos_compute0, const int &i) const{
+void FixNVTSllodMolKokkos<DeviceType>::operator()(TagFixNVTSllodMolKokkos_compute0, const int &i) const{
     if (mask[i] & groupbit) {
       m = molecule[i]-1;
       if (m < 0) vcom = v[i];  // CoM velocity of single atom is just v[i]
@@ -426,7 +426,7 @@ void FixNVTSllodMolKokkos<DeviceType>::operator(TagFixNVTSllodMolKokkos_compute0
 
 template <class DeviceType>
 KOKKOS_INLINE_FUNCTION
-void FixNVTSllodMolKokkos<DeviceType>::operator(TagFixNVTSllodMolKokkos_compute1, const int &i) const{
+void FixNVTSllodMolKokkos<DeviceType>::operator()(TagFixNVTSllodMolKokkos_compute1, const int &i) const{
     if (mask[i] & groupbit) {
       m = molecule[i]-1;
       if (m < 0) xcom = x[i];
@@ -459,7 +459,7 @@ void FixNVTSllodMolKokkos<DeviceType>::operator(TagFixNVTSllodMolKokkos_compute1
 
 template <class DeviceType>
 KOKKOS_INLINE_FUNCTION
-void FixNVTSllodMolKokkos<DeviceType>::operator(TagFixNVTSllodMolKokkos_compute2, const int &i) const{
+void FixNVTSllodMolKokkos<DeviceType>::operator()(TagFixNVTSllodMolKokkos_compute2, const int &i) const{
     if (mask[i] & groupbit) {
       m = molecule[i]-1;
       if (m < 0) xcom = x[i];
@@ -485,5 +485,3 @@ void FixNVTSllodMolKokkos<DeviceType>::operator(TagFixNVTSllodMolKokkos_compute2
       x[i][2] = x[i][2] - xcom[2] + xcom_half[2];
     } 
   }
-
-}
