@@ -56,7 +56,7 @@ class FixNVTSllodMolKokkos : public FixNHKokkos<DeviceType> {
   void operator()(TagFixNVTSllodMolKokkos_compute1, const int& i) const;
 
   KOKKOS_INLINE_FUNCTION
-  void operator()(TagFixNVTSllodMolKokkos_compute3, const int& i) const;
+  void operator()(TagFixNVTSllodMolKokkos_compute2, const int& i) const;
 
  protected:
   int molpropflag;    // 1 = molprop created by nvt/sllod/mol, 0 = user supplied
@@ -66,7 +66,7 @@ class FixNVTSllodMolKokkos : public FixNHKokkos<DeviceType> {
 
   class FixPropertyMol *molprop;
   class DomainKokkos *domainKK;
-  class AtomKokkos *atomkk 
+  class AtomKokkos *atomkk; 
 
   typename AT::t_x_array x;
   typename AT::t_x_array xcom;
