@@ -64,8 +64,8 @@ FixNVTSllodMolKokkos<DeviceType>::FixNVTSllodMolKokkos(LAMMPS *lmp, int narg, ch
     if (strcmp(arg[iarg], "molprop")==0) {
       if (iarg+1 >= narg)
         this->error->all(FLERR,"Expected name of property/mol fix after 'molprop'");
-      this->id_molprop = utils::strdup(arg[iarg+1]);
-      this->molpropflag = 0;
+        id_molprop = utils::strdup(arg[iarg+1]);
+        molpropflag = 0;
       iarg += 2;
     }
   }
@@ -106,9 +106,9 @@ FixNVTSllodMolKokkos<DeviceType>::FixNVTSllodMolKokkos(LAMMPS *lmp, int narg, ch
   // create a new compute temp style
   // id = fix-ID + _temp
   this->id_temp = utils::strdup(std::string(this->id) + "_temp");
-  this->modify->add_compute(fmt::format("{} {} temp/mol {}",
+  this->modify->add_compute(fmt::format("{} {} temp/mol/kk {}",
                       this->id_temp, this->group->names[igroup], id_molprop));
-  tcomputeflag = 1;
+  this->tcomputeflag = 1;
 }
 
 /* ----------------------------------------------------------------------
@@ -118,7 +118,7 @@ template <class DeviceType>
 void FixNVTSllodMolKokkos<DeviceType>::post_constructor() {
   if (molpropflag)
     this->modify->add_fix(fmt::format(
-          "{} {} property/mol", id_molprop, this->group->names[this->igroup]));
+          "{} {} property/mol/kk", id_molprop, this->group->names[this->igroup]));
 }
 
 /* ---------------------------------------------------------------------- */
@@ -136,7 +136,8 @@ void FixNVTSllodMolKokkos<DeviceType>::init() {
 
   // Check that temperature calculates a molecular temperature
   // TODO(SS): add moltemp flag to compute.h that we can check?
-  if (strcmp(this->temperature->style, "temp/mol") != 0)
+  if (strcmp(this->temperature->style, "temp/mol/kk") != 0)
+    // utils::strmatch(this->temperature->style, "^temp/mol") != 0)
     this->error->all(FLERR,"fix nvt/sllod/mol requires temperature computed by "
         "compute temp/mol");
 
@@ -145,6 +146,7 @@ void FixNVTSllodMolKokkos<DeviceType>::init() {
   int i;
   for (i = 0; i < this->modify->nfix; i++)
     if (strncmp(this->modify->fix[i]->style,"deform",6) == 0) {
+      //utils::strmatch(this->modify->fix[i]->style,"^deform") == 0) {
       auto def = dynamic_cast<FixDeform *>(this->modify->fix[i]);
       if (def->remapflag != Domain::NO_REMAP)
         this->error->all(FLERR,"Using fix nvt/sllod/mol with inconsistent fix deform "
@@ -194,14 +196,14 @@ void FixNVTSllodMolKokkos<DeviceType>::init() {
   molprop->request_com();
 
   // Check for exact group match since it's relied on for counting DoF by the temp compute
-  if (igroup != molprop->igroup)
+  if (this->igroup != molprop->this->igroup)
     this->error->all(FLERR, "Fix property/mol must be defined for the same group as fix nvt/sllod/mol");
 }
 
 /* ----------------------------------------------------------------------
    perform half-step scaling of velocities
 -----------------------------------------------------------------------*/
-template <class DeviceType>
+template<class DeviceType>
 void FixNVTSllodMolKokkos<DeviceType>::nh_v_temp() {
   // velocities stored as peculiar velocity (i.e. they don't include the SLLOD
   //   streaming velocity), so remove/restore bias will only be needed if some
@@ -230,7 +232,7 @@ void FixNVTSllodMolKokkos<DeviceType>::nh_v_temp() {
   double **v = atom->v;
   int *mask = atom->mask;
   int nlocal = atom->nlocal;
-  if (igroup == atom->firstgroup) nlocal = atom->nfirst;
+  if (this->igroup == atom->firstgroup) nlocal = atom->nfirst;
 
   double *vcom;
   double grad_u[6], vfac[3], vcom_new[3];
@@ -238,10 +240,10 @@ void FixNVTSllodMolKokkos<DeviceType>::nh_v_temp() {
   double* h_inv = this->domain->h_inv;
   MathExtra::multiply_shape_shape(h_rate, h_inv, grad_u);
 
-  double dt4 = 0.5*dthalf;
-  vfac[0] = exp(-grad_u[0]*this->dt4);
-  vfac[1] = exp(-grad_u[1]*this->dt4);
-  vfac[2] = exp(-grad_u[2]*this->dt4);
+  double dt4 = 0.5*this->dthalf;
+  vfac[0] = exp(-grad_u[0]*dt4);
+  vfac[1] = exp(-grad_u[1]*dt4);
+  vfac[2] = exp(-grad_u[2]*dt4);
 
 /*  for (int i = 0; i < nlocal; i++) {
     if (mask[i] & groupbit) {
@@ -303,7 +305,7 @@ void FixNVTSllodMolKokkos<DeviceType>::nve_x()
   tagint *molecule = atom->molecule;
   tagint m;
 
-  if (igroup == atom->firstgroup) nlocal = atom->nfirst;
+  if (this->igroup == atom->firstgroup) nlocal = atom->nfirst;
 
   // x update by full step only for atoms in group
 
@@ -400,8 +402,8 @@ void FixNVTSllodMolKokkos<DeviceType>::operator(TagFixNVTSllodMolKokkos_compute0
       vcom_new[0] = vcom[0]*vfac[0];
       vcom_new[1] = vcom[1]*vfac[1];
       vcom_new[2] = vcom[2]*vfac[2];
-      vcom_new[1] -= this->dt4*grad_u[3]*vcom_new[2];
-      vcom_new[0] -= this->dt4*(grad_u[5]*vcom_new[1] + grad_u[4]*vcom_new[2]);
+      vcom_new[1] -= dt4*grad_u[3]*vcom_new[2];
+      vcom_new[0] -= dt4*(grad_u[5]*vcom_new[1] + grad_u[4]*vcom_new[2]);
 
       // Thermostat force
       vcom_new[0] *= this->factor_eta;
@@ -409,8 +411,8 @@ void FixNVTSllodMolKokkos<DeviceType>::operator(TagFixNVTSllodMolKokkos_compute0
       vcom_new[2] *= this->factor_eta;
 
       // 2nd half step SLLOD force on CoM
-      vcom_new[0] -= this->dt4*(grad_u[5]*vcom[1] + grad_u[4]*vcom[2]);
-      vcom_new[1] -= this->dt4*grad_u[3]*vcom[2];
+      vcom_new[0] -= dt4*(grad_u[5]*vcom[1] + grad_u[4]*vcom[2]);
+      vcom_new[1] -= dt4*grad_u[3]*vcom[2];
       vcom_new[0] *= vfac[0];
       vcom_new[1] *= vfac[1];
       vcom_new[2] *= vfac[2];

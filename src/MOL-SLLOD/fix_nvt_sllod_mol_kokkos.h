@@ -69,8 +69,16 @@ class FixNVTSllodMolKokkos : public FixNHKokkos<DeviceType> {
   class AtomKokkos *atomkk 
 
   typename AT::t_x_array x;
+  typename AT::t_x_array xcom;
+  typename AT::t_x_array xcom_half;
+  typename AT::t_x_array molcom;
+  typename AT::t_x_array com;
   typename AT::t_v_array v;
   typename AT::t_v_array vdelu;
+  typename AT::t_v_array vcmall; 
+  typename AT::t_v_array vcom;
+  typename AT::t_v_array vcom_new;
+  typename AT::t_v_array vfac;
   typename AT::t_f_array_const f;
   typename AT::t_float_1d rmass;
   typename AT::t_float_1d mass;
