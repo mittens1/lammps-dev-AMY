@@ -15,7 +15,7 @@
 // clang-format off
 FixStyle(nvt/sllod/mol/kk,FixNVTSllodMolKokkos<LMPDeviceType>);
 FixStyle(nvt/m-sllod/mol/kk,FixNVTSllodMolKokkos<LMPDeviceType>);
-FixStyle(nvt/sllod/mol/kk/device,FixNVTSllodMolKokkos<LPMDeviceType>);
+FixStyle(nvt/sllod/mol/kk/device,FixNVTSllodMolKokkos<LMPDeviceType>);
 FixStyle(nvt/sllod/mol/kk/host,FixNVTSllodMolKokkos<LMPHostType>);
 FixStyle(nvt/m-sllod/mol/kk/device,FixNVTSllodMolKokkos<LMPDeviceType>);
 FixStyle(nvt/m-sllod/mol/kk/host,FixNVTSllodMolKokkos<LMPHostType>);
